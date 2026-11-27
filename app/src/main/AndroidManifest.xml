@@ -5,6 +5,7 @@
 
     <application
         android:allowBackup="true"
+        android:hardwareAccelerated="true"
         android:label="TV Canais"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar"
