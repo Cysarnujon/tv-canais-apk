@@ -32,7 +32,6 @@ suspend fun baixarGradeEpg(url: String): EpgDados = withContext(Dispatchers.IO) 
         val parser = Xml.newPullParser(); parser.setInput(stream, "UTF-8")
         val agora = System.currentTimeMillis()
         val jMin = agora - 30 * 60_000L; val jMax = agora + 12 * 3600_000L
-
         val canaisMap = linkedMapOf<String, CanalEpgInfo>()
         val programasMap = mutableMapOf<String, MutableList<ProgramaEpg>>()
         var chId = ""; var chNome = ""; var chLogo: String? = null
@@ -100,9 +99,8 @@ fun encontrarCanalNaLista(lista: List<Canal>, epgId: String, epgNome: String): C
 
 fun buscarProgramaAtual(epg: EpgDados, canal: Canal, agoraMs: Long): ProgramaEpg? {
     if (epg.canais.isEmpty()) return null
-    val cTvg = canal.tvgId
-    if (!cTvg.isNullOrBlank()) {
-        epg.programasPorCanal[cTvg]?.firstOrNull { agoraMs in it.inicioMs..it.fimMs }?.let { return it }
+    canal.tvgId?.takeIf { it.isNotBlank() }?.let { tvg ->
+        epg.programasPorCanal[tvg]?.firstOrNull { agoraMs in it.inicioMs..it.fimMs }?.let { return it }
     }
     val cNomeNorm = normalizarNome(canal.nome)
     val epgCanal = epg.canais.firstOrNull {
@@ -110,6 +108,62 @@ fun buscarProgramaAtual(epg: EpgDados, canal: Canal, agoraMs: Long): ProgramaEpg
         eNorm == cNomeNorm || (eNorm.length >= 3 && cNomeNorm.contains(eNorm))
     } ?: return null
     return epg.programasPorCanal[epgCanal.id]?.firstOrNull { agoraMs in it.inicioMs..it.fimMs }
+}
+
+suspend fun buscarVideoParaEpisodioSeekee(item: MidiaItem, temp: Int, ep: Int, listaCanais: List<Canal>): Canal = withContext(Dispatchers.IO) {
+    val tituloNorm = normalizarNome(item.titulo)
+    val naLista = listaCanais.firstOrNull { c ->
+        val cNorm = normalizarNome(c.nome)
+        !c.isWebSite && (cNorm.contains(tituloNorm) || tituloNorm.contains(cNorm))
+    }
+    if (naLista != null) return@withContext naLista
+
+    if (!item.trailerUrl.isNullOrBlank() && item.trailerUrl.contains(".mp4", true)) {
+        return@withContext Canal("${item.id}_mp4", item.titulo, item.trailerUrl, item.posterUrl, isWebSite = false)
+    }
+
+    val mp4Archive = buscarMp4ArchiveOrg(item.titulo)
+    if (mp4Archive != null) {
+        return@withContext Canal("${item.id}_arch", "${item.titulo} (Grátis HD)", mp4Archive, item.posterUrl, isWebSite = false)
+    }
+
+    val buscaYt = if (item.tipo == "Filmes") "${item.titulo} filme completo dublado" else "${item.titulo} temporada $temp episodio $ep"
+    val vid = buscarPrimeiroVideoYoutube(buscaYt) ?: buscarPrimeiroVideoYoutube("${item.titulo} trailer dublado")
+    if (vid != null) {
+        val label = if (item.tipo == "Filmes") item.titulo else "${item.titulo} · T$temp E$ep"
+        return@withContext Canal("${item.id}_${temp}_$ep", label,
+            "https://www.youtube.com/embed/$vid?autoplay=1&playsinline=1&rel=0",
+            item.posterUrl, isWebSite = true, youtubeVideoId = vid)
+    }
+
+    val enc = URLEncoder.encode("${item.titulo} temporada $temp episodio $ep assistir online", "UTF-8")
+    Canal("${item.id}_${temp}_$ep", "${item.titulo} · T$temp E$ep", "https://duckduckgo.com/?q=$enc", item.posterUrl, isWebSite = true)
+}
+
+suspend fun buscarMp4ArchiveOrg(titulo: String): String? = withContext(Dispatchers.IO) {
+    try {
+        val q = URLEncoder.encode("title:(\"$titulo\") AND mediatype:(movies)", "UTF-8")
+        val docs = JSONObject(lerTextoUrl("https://archive.org/advancedsearch.php?q=$q&fl[]=identifier&rows=3&output=json"))
+            .optJSONObject("response")?.optJSONArray("docs") ?: return@withContext null
+        for (i in 0 until docs.length()) {
+            val id = docs.getJSONObject(i).optTexto("identifier").ifBlank { continue }
+            val files = JSONObject(lerTextoUrl("https://archive.org/metadata/$id")).optJSONArray("files") ?: continue
+            for (j in 0 until files.length()) {
+                val name = files.getJSONObject(j).optTexto("name")
+                if (name.endsWith(".mp4", true) && !name.contains("sample", true)) {
+                    return@withContext "https://archive.org/download/$id/${Uri.encode(name, "/")}"
+                }
+            }
+        }
+        null
+    } catch (e: Exception) { null }
+}
+
+suspend fun buscarPrimeiroVideoYoutube(query: String): String? = withContext(Dispatchers.IO) {
+    try {
+        val html = lerTextoUrl("https://www.youtube.com/results?search_query=${URLEncoder.encode(query, "UTF-8")}")
+        Regex(""""videoId":"([a-zA-Z0-9_-]{11})"""").find(html)?.groupValues?.getOrNull(1)
+    } catch (e: Exception) { null }
 }
 
 suspend fun buscarCatalogoPopularSeekee(tipoFiltro: String): List<MidiaItem> = coroutineScope {
@@ -152,9 +206,7 @@ suspend fun buscarSeriesTvMazePorNome(qEnc: String): List<MidiaItem> = withConte
     try {
         val arr = JSONArray(lerTextoUrl("https://api.tvmaze.com/search/shows?q=$qEnc"))
         val lista = mutableListOf<MidiaItem>()
-        for (i in 0 until arr.length()) {
-            arr.getJSONObject(i).optJSONObject("show")?.let { parsearShowTvMaze(it, "") }?.let { lista.add(it) }
-        }
+        for (i in 0 until arr.length()) arr.getJSONObject(i).optJSONObject("show")?.let { parsearShowTvMaze(it, "") }?.let { lista.add(it) }
         lista
     } catch (e: Exception) { emptyList() }
 }
@@ -198,8 +250,7 @@ suspend fun buscarEpisodiosTvMaze(tvmazeId: Int): List<EpisodioMidia> = withCont
     try {
         val arr = JSONArray(lerTextoUrl("https://api.tvmaze.com/shows/$tvmazeId/episodes"))
         (0 until arr.length()).map { i ->
-            val o = arr.getJSONObject(i)
-            val num = o.optInt("number", i + 1)
+            val o = arr.getJSONObject(i); val num = o.optInt("number", i + 1)
             EpisodioMidia(o.optInt("season", 1), num, o.optTexto("name").ifBlank { "Episódio $num" })
         }
     } catch (e: Exception) { emptyList() }
