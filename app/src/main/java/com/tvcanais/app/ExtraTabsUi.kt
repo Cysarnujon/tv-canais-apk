@@ -9,8 +9,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -26,41 +25,78 @@ import coil.compose.AsyncImage
 fun TelaTvAoVivo(
     listaCanais: List<Canal>, canalAtual: Canal?, epgDados: EpgDados,
     pesquisaTv: String, linkDigitadoTv: String, carregandoTv: Boolean,
+    pesquisaEpg: String, linkEpg: String, carregandoEpg: Boolean,
     onPesquisa: (String) -> Unit, onLinkDigitado: (String) -> Unit,
     onCarregarBrasil: () -> Unit, onLimpar: () -> Unit, onAdicionarLink: (String) -> Unit,
     onTocar: (Canal) -> Unit, onFavoritar: (Canal) -> Unit,
     onMover: (Canal) -> Unit, onRemover: (Canal) -> Unit,
+    onPesquisaEpg: (String) -> Unit, onLinkEpg: (String) -> Unit,
+    onAtualizarGrade: () -> Unit, onSelecionarCanalGrade: (Canal?, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(modifier = modifier.padding(horizontal = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(modifier = Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            CampoTextoCompacto(pesquisaTv, onPesquisa, "🔍 Pesquisar canal pelo nome...", Modifier.weight(1f))
-            if (pesquisaTv.isNotEmpty()) { Spacer(Modifier.width(6.dp)); BotaoAcao("✕") { onPesquisa("") } }
-        }
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(enabled = !carregandoTv, modifier = Modifier.weight(1f).height(38.dp), contentPadding = PaddingValues(10.dp, 0.dp), onClick = onCarregarBrasil) {
-                Text(if (carregandoTv) "Carregando..." else "📺 Canais Brasil (Grátis)", fontSize = 12.sp)
+    var mostrarGrade by remember { mutableStateOf(false) }
+
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp))
+                    .background(if (!mostrarGrade) Color(0xFF2962FF) else Color(0xFF20202A))
+                    .clickable { mostrarGrade = false }.padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("📺 Canais", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
-            OutlinedButton(modifier = Modifier.height(38.dp), contentPadding = PaddingValues(14.dp, 0.dp), onClick = onLimpar) {
-                Text("Limpar", fontSize = 12.sp)
+            Box(
+                modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp))
+                    .background(if (mostrarGrade) Color(0xFF2962FF) else Color(0xFF20202A))
+                    .clickable { mostrarGrade = true }.padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("📅 Grade TV Map", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
         }
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            CampoTextoCompacto(linkDigitadoTv, onLinkDigitado, "🔗 Cole link .m3u, .m3u8 ou site aqui", Modifier.weight(1f))
-            Spacer(Modifier.width(8.dp))
-            Button(enabled = !carregandoTv && linkDigitadoTv.isNotBlank(), modifier = Modifier.height(40.dp), contentPadding = PaddingValues(16.dp, 0.dp), onClick = { onAdicionarLink(linkDigitadoTv) }) {
-                Text(if (carregandoTv) "..." else "Add", fontSize = 13.sp)
-            }
-        }
-        HorizontalDivider(color = Color(0xFF262630))
-        val filtrados = remember(listaCanais, pesquisaTv) {
-            val q = pesquisaTv.trim(); if (q.isEmpty()) listaCanais else listaCanais.filter { it.nome.contains(q, true) }
-        }
-        val agoraMs = System.currentTimeMillis()
-        LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 10.dp)) {
-            itemsIndexed(filtrados, key = { _, c -> c.id }) { index, canal ->
-                CardCanalLista(index, canal, canalAtual?.id == canal.id, buscarProgramaAtual(epgDados, canal, agoraMs),
-                    { onTocar(canal) }, { onFavoritar(canal) }, { onMover(canal) }, { onRemover(canal) })
+
+        if (mostrarGrade) {
+            TelaGradeTvMap(
+                epgDados, listaCanais, pesquisaEpg, linkEpg, carregandoEpg,
+                onPesquisaEpg, onLinkEpg, onAtualizarGrade, onSelecionarCanalGrade,
+                Modifier.fillMaxWidth().weight(1f)
+            )
+        } else {
+            Column(modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    CampoTextoCompacto(pesquisaTv, onPesquisa, "🔍 Pesquisar canal pelo nome...", Modifier.weight(1f))
+                    if (pesquisaTv.isNotEmpty()) { Spacer(Modifier.width(6.dp)); BotaoAcao("✕") { onPesquisa("") } }
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(enabled = !carregandoTv, modifier = Modifier.weight(1f).height(38.dp), contentPadding = PaddingValues(10.dp, 0.dp), onClick = onCarregarBrasil) {
+                        Text(if (carregandoTv) "Carregando..." else "📺 Canais Brasil (Grátis)", fontSize = 12.sp)
+                    }
+                    OutlinedButton(modifier = Modifier.height(38.dp), contentPadding = PaddingValues(14.dp, 0.dp), onClick = onLimpar) {
+                        Text("Limpar", fontSize = 12.sp)
+                    }
+                }
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    CampoTextoCompacto(linkDigitadoTv, onLinkDigitado, "🔗 Cole link .m3u, .m3u8 ou site aqui", Modifier.weight(1f))
+                    Spacer(Modifier.width(8.dp))
+                    Button(enabled = !carregandoTv && linkDigitadoTv.isNotBlank(), modifier = Modifier.height(40.dp), contentPadding = PaddingValues(16.dp, 0.dp), onClick = { onAdicionarLink(linkDigitadoTv) }) {
+                        Text(if (carregandoTv) "..." else "Add", fontSize = 13.sp)
+                    }
+                }
+                HorizontalDivider(color = Color(0xFF262630))
+                val filtrados = remember(listaCanais, pesquisaTv) {
+                    val q = pesquisaTv.trim(); if (q.isEmpty()) listaCanais else listaCanais.filter { it.nome.contains(q, true) }
+                }
+                val agoraMs = System.currentTimeMillis()
+                LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 10.dp)) {
+                    itemsIndexed(filtrados, key = { _, c -> c.id }) { index, canal ->
+                        CardCanalLista(index, canal, canalAtual?.id == canal.id, buscarProgramaAtual(epgDados, canal, agoraMs),
+                            { onTocar(canal) }, { onFavoritar(canal) }, { onMover(canal) }, { onRemover(canal) })
+                    }
+                }
             }
         }
     }
@@ -74,7 +110,6 @@ fun TelaGradeTvMap(
     onSelecionarCanal: (Canal?, String) -> Unit, modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.padding(horizontal = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Spacer(Modifier.height(4.dp))
         CampoTextoCompacto(pesquisaEpg, onPesquisa, "🔍 Pesquisar canal ou programa na grade...")
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             CampoTextoCompacto(linkEpg, onLinkEpg, "Link XMLTV (.xml ou .xml.gz)", Modifier.weight(1f))
