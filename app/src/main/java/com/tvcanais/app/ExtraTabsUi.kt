@@ -125,9 +125,7 @@ fun TelaGradeTvMap(
                                 color = Color(0xFF66BB6A), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Spacer(Modifier.height(4.dp))
                             LinearProgressIndicator(progress = { pct }, modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)), color = Color(0xFF66BB6A), trackColor = Color(0xFF2C2C38))
-                        } else {
-                            Text("Sem programação atual", color = Color.Gray, fontSize = 12.sp)
-                        }
+                        } else Text("Sem programação atual", color = Color.Gray, fontSize = 12.sp)
                         if (proxProg != null) {
                             Spacer(Modifier.height(4.dp))
                             Text("A SEGUIR (${formatarHora(proxProg.inicioMs)}): ${proxProg.titulo}", color = Color.LightGray, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -142,13 +140,15 @@ fun TelaGradeTvMap(
 @Composable
 fun TelaYouTubeFeed(
     canaisYouTube: List<CanalYouTube>, feedVideos: List<VideoYouTubeFeed>,
-    canalAtual: Canal?, modoFeed: Boolean, pastaAtual: String,
+    pastasDisponiveis: List<String>, canalAtual: Canal?, modoFeed: Boolean, pastaAtual: String,
     pesquisaYt: String, carregandoYt: Boolean,
     onImportarCsv: () -> Unit, onMudarModoFeed: (Boolean) -> Unit,
-    onMudarPasta: (String) -> Unit, onPesquisa: (String) -> Unit,
+    onMudarPasta: (String) -> Unit, onCriarPasta: () -> Unit, onPesquisa: (String) -> Unit,
     onAtualizarFeed: () -> Unit, onTocarVideo: (VideoYouTubeFeed) -> Unit,
-    onAbrirCanalYt: (CanalYouTube) -> Unit, onFavoritarYt: (CanalYouTube) -> Unit,
-    onMoverYt: (CanalYouTube) -> Unit, modifier: Modifier = Modifier
+    onMoverVideoCategoria: (VideoYouTubeFeed) -> Unit, onFavoritarVideoCanal: (VideoYouTubeFeed) -> Unit,
+    onDesinscreverVideoCanal: (VideoYouTubeFeed) -> Unit, onAbrirCanalYt: (CanalYouTube) -> Unit,
+    onFavoritarYt: (CanalYouTube) -> Unit, onMoverYt: (CanalYouTube) -> Unit,
+    onDesinscreverYt: (CanalYouTube) -> Unit, modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.padding(horizontal = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Spacer(Modifier.height(4.dp))
@@ -165,7 +165,13 @@ fun TelaYouTubeFeed(
         }
         CampoTextoCompacto(pesquisaYt, onPesquisa, "🔍 Pesquisar vídeo ou canal inscrito...")
         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(pastasPocketTube) { pasta ->
+            item {
+                Box(Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xFF2962FF))
+                    .clickable { onCriarPasta() }.padding(horizontal = 10.dp, vertical = 5.dp)) {
+                    Text("+ Categoria", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            items(pastasDisponiveis) { pasta ->
                 val ativa = pasta == pastaAtual
                 Box(Modifier.clip(RoundedCornerShape(14.dp)).background(if (ativa) Color(0xFF2E7D32) else Color(0xFF20202A))
                     .clickable { onMudarPasta(pasta) }.padding(horizontal = 10.dp, vertical = 5.dp)) {
@@ -188,12 +194,14 @@ fun TelaYouTubeFeed(
                 LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 12.dp)) {
                     item {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Feed de Inscrições · $pastaAtual", color = Color.LightGray, fontSize = 12.sp)
+                            Text("Feed · $pastaAtual", color = Color.LightGray, fontSize = 12.sp)
                             Text("↻ Atualizar Feed", color = Color(0xFF64B5F6), fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { onAtualizarFeed() })
                         }
                     }
                     items(filtrados, key = { "${it.canalId}_${it.videoId}" }) { video ->
                         val tocando = canalAtual?.youtubeVideoId == video.videoId
+                        val canalObj = canaisYouTube.firstOrNull { it.channelId == video.canalId }
+                        val ehFav = canalObj?.favorito == true
                         Column(
                             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
                                 .background(if (tocando) Color(0xFF1F2A38) else Color(0xFF181820)).clickable { onTocarVideo(video) }
@@ -206,8 +214,18 @@ fun TelaYouTubeFeed(
                             }
                             Column(Modifier.padding(10.dp)) {
                                 Text(video.titulo, color = if (tocando) Color(0xFF66BB6A) else Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                Spacer(Modifier.height(3.dp))
-                                Text("${video.canalNome} · Pasta: ${video.pasta}", color = Color.Gray, fontSize = 11.sp)
+                                Spacer(Modifier.height(4.dp))
+                                Text("${video.canalNome} · Categoria: ${canalObj?.pasta ?: video.pasta}", color = Color.Gray, fontSize = 11.sp)
+                                Spacer(Modifier.height(8.dp))
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    BotaoAcao("⇄ Categoria") { onMoverVideoCategoria(video) }
+                                    BotaoAcao(if (ehFav) "⭐ Favorito" else "☆ Favoritar") { onFavoritarVideoCanal(video) }
+                                    Spacer(Modifier.weight(1f))
+                                    Box(Modifier.clip(RoundedCornerShape(6.dp)).background(Color(0xFF4A1B1B))
+                                        .clickable { onDesinscreverVideoCanal(video) }.padding(horizontal = 8.dp, vertical = 5.dp)) {
+                                        Text("Desinscrever", color = Color(0xFFFF8A80), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
                             }
                         }
                     }
@@ -231,10 +249,11 @@ fun TelaYouTubeFeed(
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
                             Text(yt.nome, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text("Pasta: ${yt.pasta}", color = Color.Gray, fontSize = 11.sp)
+                            Text("Categoria: ${yt.pasta}", color = Color.Gray, fontSize = 11.sp)
                         }
                         Text(if (yt.favorito) "⭐" else "☆", fontSize = 18.sp, modifier = Modifier.clickable { onFavoritarYt(yt) }.padding(6.dp))
                         Text("⇄", color = Color(0xFF64B5F6), fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { onMoverYt(yt) }.padding(6.dp))
+                        Text("✕", color = Color(0xFFFF8A80), fontSize = 15.sp, modifier = Modifier.clickable { onDesinscreverYt(yt) }.padding(6.dp))
                     }
                 }
             }
@@ -251,7 +270,7 @@ fun TelaFavoritos(
     val favs = remember(listaCanais) { listaCanais.filter { it.favorito } }
     if (favs.isEmpty()) {
         Box(modifier = modifier, contentAlignment = Alignment.Center) {
-            Text("Toque na estrela ⭐ em qualquer canal, filme ou série para salvar aqui.", color = Color.Gray, fontSize = 13.sp)
+            Text("Toque na estrela ⭐ em qualquer canal para salvar aqui.", color = Color.Gray, fontSize = 13.sp)
         }
     } else {
         val agoraMs = System.currentTimeMillis()
