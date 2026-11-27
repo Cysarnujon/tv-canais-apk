@@ -112,6 +112,8 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
     var ytPlayerRef by remember { mutableStateOf<YouTubePlayer?>(null) }
     var lastLoadedYtId by remember { mutableStateOf<String?>(null) }
 
+    var jellyfinCfg by remember { mutableStateOf(carregarJellyfinConfig(context)) }
+
     var listaCanais by remember {
         mutableStateOf(carregarCanaisSalvos(context).ifEmpty {
             listOf(
@@ -158,9 +160,7 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                 canalAtual = validos.first()
                 pesquisaTv = ""
                 mensagemStatus = "${novos.size} novos canais ($rotulo)!"
-            } else {
-                mensagemStatus = "Lista '$rotulo' indisponível no momento."
-            }
+            } else mensagemStatus = "Lista '$rotulo' indisponível."
             carregandoTv = false
         }
     }
@@ -177,39 +177,29 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
         carregandoTv = true; mensagemStatus = "Baixando todas as listas grátis..."
         scope.launch {
             val baixados = fontes.map { u -> async { processarLink(u) } }.awaitAll()
-                .flatten()
-                .filter { !it.isWebSite && !it.url.endsWith(".m3u", true) }
-                .distinctBy { it.url }
+                .flatten().filter { !it.isWebSite && !it.url.endsWith(".m3u", true) }.distinctBy { it.url }
             val existentes = listaCanais.map { it.url }.toSet()
             val novos = baixados.filterNot { it.url in existentes }
             if (baixados.isNotEmpty()) {
                 atualizarCanais(novos + listaCanais)
                 if (canalAtual == null) canalAtual = baixados.first()
-                mensagemStatus = "${novos.size} canais novos carregados (total: ${novos.size + listaCanais.size})!"
-            } else {
-                mensagemStatus = "Não foi possível baixar as listas agora."
-            }
+                mensagemStatus = "${novos.size} canais novos carregados!"
+            } else mensagemStatus = "Não foi possível baixar as listas agora."
             carregandoTv = false
         }
     }
 
     fun abrirSiteNoNavegador(titulo: String, url: String) {
-        mostrarSiteCompleto = true
-        navegadorExpandido = true
+        mostrarSiteCompleto = true; navegadorExpandido = true
         canalAtual = Canal(nome = titulo, url = url, isWebSite = true)
     }
 
     fun pesquisarFontesWeb(qRaw: String) {
         val q = qRaw.trim()
         if (q.isBlank()) { emBuscaFontes = false; return }
-        if (q.startsWith("http://", true) || q.startsWith("https://", true)) {
-            abrirSiteNoNavegador(q.take(36), q); return
-        }
+        if (q.startsWith("http://", true) || q.startsWith("https://", true)) { abrirSiteNoNavegador(q.take(36), q); return }
         emBuscaFontes = true; navegadorExpandido = false; carregandoBusca = true
-        scope.launch {
-            linksWebBusca = buscarWebDuckDuckGo("$q assistir dublado portugues")
-            carregandoBusca = false
-        }
+        scope.launch { linksWebBusca = buscarWebDuckDuckGo("$q assistir dublado portugues"); carregandoBusca = false }
     }
 
     fun carregarFeedYt(pasta: String = pastaYtAtual) {
@@ -241,10 +231,7 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
     BackHandler(enabled = telaCheia || navegadorExpandido || emBuscaFontes) {
         when {
             telaCheia -> { telaCheia = false; activity.alterarTelaCheia(false) }
-            navegadorExpandido -> {
-                if (webViewRef?.canGoBack() == true) webViewRef?.goBack()
-                else navegadorExpandido = false
-            }
+            navegadorExpandido -> if (webViewRef?.canGoBack() == true) webViewRef?.goBack() else navegadorExpandido = false
             emBuscaFontes -> emBuscaFontes = false
         }
     }
@@ -254,8 +241,11 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
             addListener(object : Player.Listener {
                 override fun onPlayerError(error: PlaybackException) {
                     val a = canalAtual
-                    if (a != null && a.webOriginalUrl != null) canalAtual = a.copy(url = a.webOriginalUrl, isWebSite = true, webOriginalUrl = null)
-                    else mensagemStatus = "Stream indisponível."
+                    if (a != null && a.fallbackStreamUrl != null) {
+                        canalAtual = a.copy(url = a.fallbackStreamUrl, fallbackStreamUrl = null)
+                    } else if (a != null && a.webOriginalUrl != null) {
+                        canalAtual = a.copy(url = a.webOriginalUrl, isWebSite = true, webOriginalUrl = null)
+                    } else mensagemStatus = "Stream indisponível."
                 }
             })
         }
@@ -271,12 +261,8 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
     }
 
     LaunchedEffect(canalAtual?.youtubeVideoId, ytPlayerRef) {
-        val vid = canalAtual?.youtubeVideoId
-        val player = ytPlayerRef
-        if (vid != null && player != null && lastLoadedYtId != vid) {
-            lastLoadedYtId = vid
-            player.loadVideo(vid, 0f)
-        }
+        val vid = canalAtual?.youtubeVideoId; val player = ytPlayerRef
+        if (vid != null && player != null && lastLoadedYtId != vid) { lastLoadedYtId = vid; player.loadVideo(vid, 0f) }
     }
 
     val playerExpandido = isInPip || telaCheia
@@ -300,22 +286,17 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                         modifier = Modifier.fillMaxSize(),
                         factory = { ctx ->
                             YouTubePlayerView(ctx).apply {
-                                enableAutomaticInitialization = false
-                                activity.lifecycle.addObserver(this)
+                                enableAutomaticInitialization = false; activity.lifecycle.addObserver(this)
                                 val options = IFramePlayerOptions.Builder(ctx).controls(1).rel(0).build()
                                 initialize(object : AbstractYouTubePlayerListener() {
                                     override fun onReady(youTubePlayer: YouTubePlayer) {
                                         ytPlayerRef = youTubePlayer
-                                        val vid = canalAtual?.youtubeVideoId
-                                        if (vid != null) { lastLoadedYtId = vid; youTubePlayer.loadVideo(vid, 0f) }
+                                        canalAtual?.youtubeVideoId?.let { vid -> lastLoadedYtId = vid; youTubePlayer.loadVideo(vid, 0f) }
                                     }
                                 }, options)
                             }
                         },
-                        onRelease = { ytView ->
-                            ytPlayerRef = null; lastLoadedYtId = null
-                            activity.lifecycle.removeObserver(ytView); ytView.release()
-                        }
+                        onRelease = { ytView -> ytPlayerRef = null; lastLoadedYtId = null; activity.lifecycle.removeObserver(ytView); ytView.release() }
                     )
                 } else if (atual.isWebSite) {
                     var capturou by remember(atual.url) { mutableStateOf(false) }
@@ -326,9 +307,7 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                                 webViewRef = this
                                 settings.javaScriptEnabled = true; settings.domStorageEnabled = true
                                 settings.useWideViewPort = true; settings.loadWithOverviewMode = true; settings.mediaPlaybackRequiresUserGesture = false
-                                webChromeClient = object : WebChromeClient() {
-                                    override fun onPermissionRequest(r: PermissionRequest?) { r?.grant(r.resources) }
-                                }
+                                webChromeClient = object : WebChromeClient() { override fun onPermissionRequest(r: PermissionRequest?) { r?.grant(r.resources) } }
                                 webViewClient = object : WebViewClient() {
                                     override fun shouldInterceptRequest(v: WebView?, r: WebResourceRequest?): WebResourceResponse? {
                                         val u = r?.url?.toString() ?: return null
@@ -347,37 +326,27 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                                 }
                             }
                         },
-                        update = { wv ->
-                            webViewRef = wv
-                            if (wv.tag != atual.url) { wv.tag = atual.url; wv.loadUrl(atual.url) }
-                        }
+                        update = { wv -> webViewRef = wv; if (wv.tag != atual.url) { wv.tag = atual.url; wv.loadUrl(atual.url) } }
                     )
                 } else {
                     AndroidView(modifier = Modifier.fillMaxSize(), factory = { ctx -> PlayerView(ctx).apply { player = exoPlayer; useController = true } })
                 }
-                if (telaCheia && !isInPip) {
-                    Box(Modifier.align(Alignment.TopEnd).padding(16.dp)) { BotaoAcao("✕ Sair") { telaCheia = false; activity.alterarTelaCheia(false) } }
-                }
+                if (telaCheia && !isInPip) Box(Modifier.align(Alignment.TopEnd).padding(16.dp)) { BotaoAcao("✕ Sair") { telaCheia = false; activity.alterarTelaCheia(false) } }
             }
 
             if (!playerExpandido && canalAtual != null) {
                 Row(Modifier.fillMaxWidth().background(Color(0xFF16161E)).padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (canalAtual!!.isWebSite && canalAtual!!.youtubeVideoId == null) {
-                        BotaoAcao("←") { if (webViewRef?.canGoBack() == true) webViewRef?.goBack() }
-                        Spacer(Modifier.width(4.dp))
+                        BotaoAcao("←") { if (webViewRef?.canGoBack() == true) webViewRef?.goBack() }; Spacer(Modifier.width(4.dp))
                     }
                     Text(canalAtual!!.nome, color = Color(0xFF66BB6A), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     Spacer(Modifier.width(4.dp))
                     if (canalAtual!!.isWebSite && canalAtual!!.youtubeVideoId == null) {
-                        BotaoAcao(if (navegadorExpandido) "16:9" else "Expandir") { navegadorExpandido = !navegadorExpandido }
-                        Spacer(Modifier.width(4.dp))
-                        BotaoAcao(if (mostrarSiteCompleto) "Focar" else "Site") { mostrarSiteCompleto = !mostrarSiteCompleto; canalAtual = canalAtual!!.copy() }
-                        Spacer(Modifier.width(4.dp))
+                        BotaoAcao(if (navegadorExpandido) "16:9" else "Expandir") { navegadorExpandido = !navegadorExpandido }; Spacer(Modifier.width(4.dp))
+                        BotaoAcao(if (mostrarSiteCompleto) "Focar" else "Site") { mostrarSiteCompleto = !mostrarSiteCompleto; canalAtual = canalAtual!!.copy() }; Spacer(Modifier.width(4.dp))
                     }
-                    BotaoAcao("PiP") { activity.entrarModoPip() }
-                    Spacer(Modifier.width(4.dp))
-                    BotaoAcao("Tela Cheia") { telaCheia = true; activity.alterarTelaCheia(true) }
-                    Spacer(Modifier.width(4.dp))
+                    BotaoAcao("PiP") { activity.entrarModoPip() }; Spacer(Modifier.width(4.dp))
+                    BotaoAcao("Tela Cheia") { telaCheia = true; activity.alterarTelaCheia(true) }; Spacer(Modifier.width(4.dp))
                     BotaoAcao("✕") { navegadorExpandido = false; canalAtual = null }
                 }
             }
@@ -398,10 +367,7 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
             when (abaPrincipal) {
                 AbaPrincipal.NAVEGADOR -> Column(Modifier.fillMaxWidth().weight(1f)) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        if (emBuscaFontes) {
-                            BotaoAcao("←") { emBuscaFontes = false }
-                            Spacer(Modifier.width(6.dp))
-                        }
+                        if (emBuscaFontes) { BotaoAcao("←") { emBuscaFontes = false }; Spacer(Modifier.width(6.dp)) }
                         CampoTextoCompacto(homeQuery, { homeQuery = it }, "🔍 Pesquisar filme, série, novela ou canal...", Modifier.weight(1f))
                         Spacer(Modifier.width(6.dp))
                         Button(enabled = !carregandoBusca && homeQuery.isNotBlank(), modifier = Modifier.height(40.dp), contentPadding = PaddingValues(14.dp, 0.dp), onClick = { pesquisarFontesWeb(homeQuery) }) {
@@ -410,8 +376,7 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                     }
                     if (emBuscaFontes) {
                         val canaisLocais = remember(listaCanais, homeQuery) {
-                            val q = homeQuery.trim()
-                            if (q.isEmpty()) emptyList() else listaCanais.filter { it.nome.contains(q, true) }
+                            val q = homeQuery.trim(); if (q.isEmpty()) emptyList() else listaCanais.filter { it.nome.contains(q, true) }
                         }
                         TelaFontesWebBusca(
                             homeQuery, carregandoBusca, canaisLocais, canalAtual, epgDados, linksWebBusca,
@@ -420,30 +385,31 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                             { canalParaMover = it },
                             { c -> atualizarCanais(listaCanais.filterNot { it.id == c.id }) },
                             { web -> abrirSiteNoNavegador(web.titulo, web.url) },
-                            {
-                                val enc = URLEncoder.encode("$homeQuery assistir dublado portugues", "UTF-8")
-                                abrirSiteNoNavegador("Busca: $homeQuery", "https://duckduckgo.com/?q=$enc")
-                            },
+                            { abrirSiteNoNavegador("Busca: $homeQuery", "https://duckduckgo.com/?q=${URLEncoder.encode("$homeQuery assistir dublado portugues", "UTF-8")}") },
                             Modifier.fillMaxWidth().weight(1f)
                         )
                     } else {
                         TelaInicioCanais(
                             listaCanais, canalAtual, epgDados, carregandoTv,
-                            { url, nome -> carregarListaM3u(url, nome) },
-                            { carregarTodasListas() },
+                            { url, nome -> carregarListaM3u(url, nome) }, { carregarTodasListas() },
                             { atualizarCanais(emptyList()); canalAtual = null },
                             { canalAtual = it },
                             { c -> atualizarCanais(listaCanais.map { if (it.id == c.id) it.copy(favorito = !it.favorito) else it }) },
-                            { canalParaMover = it },
-                            { c -> atualizarCanais(listaCanais.filterNot { it.id == c.id }) },
+                            { canalParaMover = it }, { c -> atualizarCanais(listaCanais.filterNot { it.id == c.id }) },
                             Modifier.fillMaxWidth().weight(1f)
                         )
                     }
                 }
+                AbaPrincipal.JELLYFIN -> TelaJellyfin(
+                    cfg = jellyfinCfg,
+                    onSalvarCfg = { nova -> jellyfinCfg = nova; salvarJellyfinConfig(context, nova) },
+                    onTocarCanal = { c -> navegadorExpandido = false; canalAtual = c },
+                    onAbrirWebUi = { urlWeb -> abrirSiteNoNavegador("Jellyfin Web", urlWeb) },
+                    modifier = Modifier.fillMaxWidth().weight(1f)
+                )
                 AbaPrincipal.TV -> TelaTvAoVivo(
                     listaCanais, canalAtual, epgDados, pesquisaTv, linkDigitadoTv, carregandoTv,
-                    { pesquisaTv = it }, { linkDigitadoTv = it },
-                    { carregarTodasListas() },
+                    { pesquisaTv = it }, { linkDigitadoTv = it }, { carregarTodasListas() },
                     { atualizarCanais(emptyList()); canalAtual = null },
                     { raw ->
                         carregandoTv = true
@@ -454,8 +420,7 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                     },
                     { canalAtual = it },
                     { c -> atualizarCanais(listaCanais.map { if (it.id == c.id) it.copy(favorito = !it.favorito) else it }) },
-                    { canalParaMover = it },
-                    { c -> atualizarCanais(listaCanais.filterNot { it.id == c.id }) },
+                    { canalParaMover = it }, { c -> atualizarCanais(listaCanais.filterNot { it.id == c.id }) },
                     Modifier.fillMaxWidth().weight(1f)
                 )
                 AbaPrincipal.GRADE -> TelaGradeTvMap(
@@ -483,16 +448,14 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                         scope.launch {
                             val vids = buscarVideosCanalYouTube(yt, 15)
                             if (vids.isNotEmpty()) {
-                                feedYtVideos = vids; modoFeedYt = true; val v = vids.first()
-                                navegadorExpandido = false
+                                feedYtVideos = vids; modoFeedYt = true; val v = vids.first(); navegadorExpandido = false
                                 canalAtual = Canal("yt_${v.videoId}", "${yt.nome} · ${v.titulo}", "https://www.youtube.com/watch?v=${v.videoId}", v.thumbUrl, isWebSite = true, youtubeVideoId = v.videoId)
                             }
                             carregandoYt = false
                         }
                     },
                     { yt -> atualizarCanaisYt(canaisYouTube.map { if (it.channelId == yt.channelId) it.copy(favorito = !it.favorito) else it }) },
-                    { canalYtParaMover = it },
-                    Modifier.fillMaxWidth().weight(1f)
+                    { canalYtParaMover = it }, Modifier.fillMaxWidth().weight(1f)
                 )
                 AbaPrincipal.FAVORITOS -> TelaFavoritos(
                     listaCanais, canalAtual, epgDados, { canalAtual = it },
