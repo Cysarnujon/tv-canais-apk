@@ -20,6 +20,7 @@ import java.util.UUID
 
 enum class AbaPrincipal(val titulo: String, val icone: String) {
     NAVEGADOR("Início", "🏠"),
+    JELLYFIN("Jellyfin", "🟣"),
     TV("TV Ao Vivo", "📺"),
     GRADE("Grade TV", "📅"),
     YOUTUBE("YouTube", "▶️"),
@@ -35,29 +36,21 @@ enum class CategoriaCanal(val titulo: String, val icone: String) {
     DOCS("Docs", "🌍")
 }
 
-data class PlataformaGratuita(
-    val nome: String,
-    val subtitulo: String,
-    val icone: String,
-    val corHex: Long,
-    val urlHome: String,
-    val urlBuscaTemplate: String
-) {
-    fun gerarUrlBusca(query: String): String {
-        val enc = URLEncoder.encode(query.trim(), "UTF-8")
-        return urlBuscaTemplate.replace("{q}", enc)
-    }
-}
+data class JellyfinConfig(
+    val serverUrl: String = "",
+    val username: String = "",
+    val userId: String = "",
+    val accessToken: String = "",
+    val deviceId: String = UUID.randomUUID().toString()
+)
 
-val plataformasGratuitas = listOf(
-    PlataformaGratuita("Mercado Play", "Filmes, Séries e Desenhos Grátis", "🟡", 0xFF5C4D00, "https://play.mercadolivre.com.br/", "https://play.mercadolivre.com.br/buscar?q={q}"),
-    PlataformaGratuita("Plex Grátis", "Filmes, Séries & Canais Ao Vivo", "🟠", 0xFF5A3700, "https://watch.plex.tv/pt-BR", "https://watch.plex.tv/search?q={q}"),
-    PlataformaGratuita("Pluto TV", "Canais Ao Vivo, Filmes & Animes", "🟣", 0xFF3E1F5C, "https://pluto.tv/br/live-tv", "https://duckduckgo.com/?q=site%3Apluto.tv+{q}"),
-    PlataformaGratuita("Globoplay (Grátis)", "TV Globo Ao Vivo & Conteúdo Aberto", "🔴", 0xFF5C1414, "https://globoplay.globo.com/agora-na-tv/", "https://globoplay.globo.com/busca/?q={q}"),
-    PlataformaGratuita("SBT+ / SBT", "Novelas, Programas & Ao Vivo Grátis", "🔵", 0xFF103766, "https://mais.sbt.com.br/", "https://mais.sbt.com.br/busca?q={q}"),
-    PlataformaGratuita("Bandplay / Band", "Esportes, Jornalismo, Filmes & Ao Vivo", "🟢", 0xFF134E2A, "https://bandplay.com/", "https://bandplay.com/busca?q={q}"),
-    PlataformaGratuita("TV Cultura", "Ao Vivo, Infantil & Documentários", "🌐", 0xFF1F3B4D, "https://cultura.uol.com.br/aovivo/", "https://cultura.uol.com.br/busca/?q={q}"),
-    PlataformaGratuita("JustWatch BR", "Descobrir onde assistir grátis", "🔎", 0xFF2B3544, "https://www.justwatch.com/br", "https://www.justwatch.com/br/busca?q={q}")
+data class JellyfinItem(
+    val id: String,
+    val nome: String,
+    val tipo: String,
+    val subtitulo: String = "",
+    val posterUrl: String? = null,
+    val ehPastaOuSerie: Boolean = false
 )
 
 data class Canal(
@@ -68,6 +61,7 @@ data class Canal(
     val tvgId: String? = null,
     val isWebSite: Boolean = false,
     val webOriginalUrl: String? = null,
+    val fallbackStreamUrl: String? = null,
     val youtubeVideoId: String? = null,
     val categoria: CategoriaCanal = CategoriaCanal.TV,
     val favorito: Boolean = false
@@ -95,17 +89,7 @@ data class VideoYouTubeFeed(
 data class ProgramaEpg(val channelId: String, val titulo: String, val inicioMs: Long, val fimMs: Long)
 data class CanalEpgInfo(val id: String, val nome: String, val logoUrl: String? = null)
 data class EpgDados(val canais: List<CanalEpgInfo> = emptyList(), val programasPorCanal: Map<String, List<ProgramaEpg>> = emptyMap())
-
-data class MidiaItem(
-    val id: String, val titulo: String, val tipo: String, val ano: Int = 0, val pais: String = "",
-    val generos: List<String> = emptyList(), val sinopse: String = "", val posterUrl: String? = null,
-    val nota: String = "8.0", val popularidade: Int = 50000, val tvmazeId: Int? = null,
-    val trailerUrl: String? = null, val webUrl: String? = null
-)
-
-data class EpisodioMidia(val temporada: Int, val numero: Int, val titulo: String)
 data class ResultadoWeb(val titulo: String, val url: String, val dominio: String, val resumo: String)
-data class BuscaSeekeeResultado(val midias: List<MidiaItem> = emptyList(), val linksWeb: List<ResultadoWeb> = emptyList())
 
 val pastasPocketTube = listOf(
     "Todos", "Favoritos", "Geral", "Entretenimento",
@@ -121,6 +105,26 @@ fun JSONObject.optTexto(chave: String): String {
 fun limparHtml(texto: String): String {
     if (texto.isBlank()) return ""
     return Html.fromHtml(texto, Html.FROM_HTML_MODE_COMPACT).toString().trim()
+}
+
+fun salvarJellyfinConfig(context: Context, cfg: JellyfinConfig) {
+    val obj = JSONObject().apply {
+        put("serverUrl", cfg.serverUrl); put("username", cfg.username)
+        put("userId", cfg.userId); put("accessToken", cfg.accessToken); put("deviceId", cfg.deviceId)
+    }
+    context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE).edit().putString("jellyfin_cfg", obj.toString()).apply()
+}
+
+fun carregarJellyfinConfig(context: Context): JellyfinConfig {
+    val json = context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE).getString("jellyfin_cfg", null) ?: return JellyfinConfig()
+    return try {
+        val o = JSONObject(json)
+        JellyfinConfig(
+            o.optTexto("serverUrl"), o.optTexto("username"),
+            o.optTexto("userId"), o.optTexto("accessToken"),
+            o.optTexto("deviceId").ifBlank { UUID.randomUUID().toString() }
+        )
+    } catch (e: Exception) { JellyfinConfig() }
 }
 
 fun salvarCanais(context: Context, canais: List<Canal>) {
