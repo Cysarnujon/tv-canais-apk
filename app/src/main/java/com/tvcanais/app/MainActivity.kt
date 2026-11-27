@@ -1,6 +1,7 @@
 package com.tvcanais.app
 
 import android.app.PictureInPictureParams
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.net.Uri
@@ -111,7 +112,6 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
 
     var ytPlayerRef by remember { mutableStateOf<YouTubePlayer?>(null) }
     var lastLoadedYtId by remember { mutableStateOf<String?>(null) }
-
     var jellyfinCfg by remember { mutableStateOf(carregarJellyfinConfig(context)) }
 
     var listaCanais by remember {
@@ -134,12 +134,16 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
     var carregandoEpg by remember { mutableStateOf(false) }
 
     var canaisYouTube by remember { mutableStateOf(carregarYouTubeSalvos(context)) }
+    var pastasYt by remember { mutableStateOf(carregarPastasYt(context)) }
     var modoFeedYt by remember { mutableStateOf(true) }
     var pastaYtAtual by remember { mutableStateOf("Todos") }
     var pesquisaYt by remember { mutableStateOf("") }
     var feedYtVideos by remember { mutableStateOf<List<VideoYouTubeFeed>>(emptyList()) }
     var carregandoYt by remember { mutableStateOf(false) }
     var canalYtParaMover by remember { mutableStateOf<CanalYouTube?>(null) }
+    var canalYtParaDesinscrever by remember { mutableStateOf<CanalYouTube?>(null) }
+    var abrirDialogNovaPasta by remember { mutableStateOf(false) }
+    var nomeNovaPasta by remember { mutableStateOf("") }
 
     var homeQuery by remember { mutableStateOf("") }
     var emBuscaFontes by remember { mutableStateOf(false) }
@@ -149,6 +153,21 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
     fun atualizarCanais(nova: List<Canal>) { listaCanais = nova; salvarCanais(context, nova) }
     fun atualizarCanaisYt(nova: List<CanalYouTube>) { canaisYouTube = nova; salvarYouTube(context, nova) }
 
+    fun moverCategoriaYt(channelId: String, novaPasta: String) {
+        atualizarCanaisYt(canaisYouTube.map { if (it.channelId == channelId) it.copy(pasta = novaPasta) else it })
+        feedYtVideos = feedYtVideos.map { if (it.canalId == channelId) it.copy(pasta = novaPasta) else it }
+        if (pastaYtAtual != "Todos" && pastaYtAtual != "Favoritos" && pastaYtAtual != novaPasta) {
+            feedYtVideos = feedYtVideos.filterNot { it.canalId == channelId }
+        }
+        mensagemStatus = "Canal movido para '$novaPasta'!"
+    }
+
+    fun desinscreverCanalYt(yt: CanalYouTube) {
+        atualizarCanaisYt(canaisYouTube.filterNot { it.channelId == yt.channelId })
+        feedYtVideos = feedYtVideos.filterNot { it.canalId == yt.channelId }
+        mensagemStatus = "Você se desinscreveu de '${yt.nome}'."
+    }
+
     fun carregarListaM3u(url: String, rotulo: String) {
         carregandoTv = true; mensagemStatus = "Baixando $rotulo..."
         scope.launch {
@@ -156,9 +175,7 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
             if (validos.isNotEmpty()) {
                 val existentes = listaCanais.map { it.url }.toSet()
                 val novos = validos.filterNot { it.url in existentes }
-                atualizarCanais(novos + listaCanais)
-                canalAtual = validos.first()
-                pesquisaTv = ""
+                atualizarCanais(novos + listaCanais); canalAtual = validos.first(); pesquisaTv = ""
                 mensagemStatus = "${novos.size} novos canais ($rotulo)!"
             } else mensagemStatus = "Lista '$rotulo' indisponível."
             carregandoTv = false
@@ -181,8 +198,7 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
             val existentes = listaCanais.map { it.url }.toSet()
             val novos = baixados.filterNot { it.url in existentes }
             if (baixados.isNotEmpty()) {
-                atualizarCanais(novos + listaCanais)
-                if (canalAtual == null) canalAtual = baixados.first()
+                atualizarCanais(novos + listaCanais); if (canalAtual == null) canalAtual = baixados.first()
                 mensagemStatus = "${novos.size} canais novos carregados!"
             } else mensagemStatus = "Não foi possível baixar as listas agora."
             carregandoTv = false
@@ -190,8 +206,7 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
     }
 
     fun abrirSiteNoNavegador(titulo: String, url: String) {
-        mostrarSiteCompleto = true; navegadorExpandido = true
-        canalAtual = Canal(nome = titulo, url = url, isWebSite = true)
+        mostrarSiteCompleto = true; navegadorExpandido = true; canalAtual = Canal(nome = titulo, url = url, isWebSite = true)
     }
 
     fun pesquisarFontesWeb(qRaw: String) {
@@ -241,11 +256,9 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
             addListener(object : Player.Listener {
                 override fun onPlayerError(error: PlaybackException) {
                     val a = canalAtual
-                    if (a != null && a.fallbackStreamUrl != null) {
-                        canalAtual = a.copy(url = a.fallbackStreamUrl, fallbackStreamUrl = null)
-                    } else if (a != null && a.webOriginalUrl != null) {
-                        canalAtual = a.copy(url = a.webOriginalUrl, isWebSite = true, webOriginalUrl = null)
-                    } else mensagemStatus = "Stream indisponível."
+                    if (a != null && a.fallbackStreamUrl != null) canalAtual = a.copy(url = a.fallbackStreamUrl, fallbackStreamUrl = null)
+                    else if (a != null && a.webOriginalUrl != null) canalAtual = a.copy(url = a.webOriginalUrl, isWebSite = true, webOriginalUrl = null)
+                    else mensagemStatus = "Stream indisponível."
                 }
             })
         }
@@ -255,8 +268,7 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
     LaunchedEffect(canalAtual) {
         val c = canalAtual
         if (c != null && !c.isWebSite) {
-            navegadorExpandido = false
-            exoPlayer.setMediaItem(MediaItem.fromUri(c.url)); exoPlayer.prepare(); exoPlayer.playWhenReady = true
+            navegadorExpandido = false; exoPlayer.setMediaItem(MediaItem.fromUri(c.url)); exoPlayer.prepare(); exoPlayer.playWhenReady = true
         } else exoPlayer.pause()
     }
 
@@ -304,8 +316,7 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                         modifier = Modifier.fillMaxSize(),
                         factory = { ctx ->
                             WebView(ctx).apply {
-                                webViewRef = this
-                                settings.javaScriptEnabled = true; settings.domStorageEnabled = true
+                                webViewRef = this; settings.javaScriptEnabled = true; settings.domStorageEnabled = true
                                 settings.useWideViewPort = true; settings.loadWithOverviewMode = true; settings.mediaPlaybackRequiresUserGesture = false
                                 webChromeClient = object : WebChromeClient() { override fun onPermissionRequest(r: PermissionRequest?) { r?.grant(r.resources) } }
                                 webViewClient = object : WebViewClient() {
@@ -380,10 +391,8 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                         }
                         TelaFontesWebBusca(
                             homeQuery, carregandoBusca, canaisLocais, canalAtual, epgDados, linksWebBusca,
-                            { canalAtual = it },
-                            { c -> atualizarCanais(listaCanais.map { if (it.id == c.id) it.copy(favorito = !it.favorito) else it }) },
-                            { canalParaMover = it },
-                            { c -> atualizarCanais(listaCanais.filterNot { it.id == c.id }) },
+                            { canalAtual = it }, { c -> atualizarCanais(listaCanais.map { if (it.id == c.id) it.copy(favorito = !it.favorito) else it }) },
+                            { canalParaMover = it }, { c -> atualizarCanais(listaCanais.filterNot { it.id == c.id }) },
                             { web -> abrirSiteNoNavegador(web.titulo, web.url) },
                             { abrirSiteNoNavegador("Busca: $homeQuery", "https://duckduckgo.com/?q=${URLEncoder.encode("$homeQuery assistir dublado portugues", "UTF-8")}") },
                             Modifier.fillMaxWidth().weight(1f)
@@ -392,8 +401,7 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                         TelaInicioCanais(
                             listaCanais, canalAtual, epgDados, carregandoTv,
                             { url, nome -> carregarListaM3u(url, nome) }, { carregarTodasListas() },
-                            { atualizarCanais(emptyList()); canalAtual = null },
-                            { canalAtual = it },
+                            { atualizarCanais(emptyList()); canalAtual = null }, { canalAtual = it },
                             { c -> atualizarCanais(listaCanais.map { if (it.id == c.id) it.copy(favorito = !it.favorito) else it }) },
                             { canalParaMover = it }, { c -> atualizarCanais(listaCanais.filterNot { it.id == c.id }) },
                             Modifier.fillMaxWidth().weight(1f)
@@ -401,11 +409,9 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                     }
                 }
                 AbaPrincipal.JELLYFIN -> TelaJellyfin(
-                    cfg = jellyfinCfg,
-                    onSalvarCfg = { nova -> jellyfinCfg = nova; salvarJellyfinConfig(context, nova) },
-                    onTocarCanal = { c -> navegadorExpandido = false; canalAtual = c },
-                    onAbrirWebUi = { urlWeb -> abrirSiteNoNavegador("Jellyfin Web", urlWeb) },
-                    modifier = Modifier.fillMaxWidth().weight(1f)
+                    jellyfinCfg, { nova -> jellyfinCfg = nova; salvarJellyfinConfig(context, nova) },
+                    { c -> navegadorExpandido = false; canalAtual = c }, { urlWeb -> abrirSiteNoNavegador("Jellyfin Web", urlWeb) },
+                    Modifier.fillMaxWidth().weight(1f)
                 )
                 AbaPrincipal.TV -> TelaTvAoVivo(
                     listaCanais, canalAtual, epgDados, pesquisaTv, linkDigitadoTv, carregandoTv,
@@ -418,14 +424,12 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                             if (novos.isNotEmpty()) canalAtual = novos.first(); linkDigitadoTv = ""; pesquisaTv = ""; carregandoTv = false
                         }
                     },
-                    { canalAtual = it },
-                    { c -> atualizarCanais(listaCanais.map { if (it.id == c.id) it.copy(favorito = !it.favorito) else it }) },
+                    { canalAtual = it }, { c -> atualizarCanais(listaCanais.map { if (it.id == c.id) it.copy(favorito = !it.favorito) else it }) },
                     { canalParaMover = it }, { c -> atualizarCanais(listaCanais.filterNot { it.id == c.id }) },
                     Modifier.fillMaxWidth().weight(1f)
                 )
                 AbaPrincipal.GRADE -> TelaGradeTvMap(
-                    epgDados, listaCanais, pesquisaEpg, linkEpg, carregandoEpg,
-                    { pesquisaEpg = it }, { linkEpg = it },
+                    epgDados, listaCanais, pesquisaEpg, linkEpg, carregandoEpg, { pesquisaEpg = it }, { linkEpg = it },
                     {
                         carregandoEpg = true; mensagemStatus = "Baixando Grade TV Map..."
                         scope.launch {
@@ -439,10 +443,14 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                     Modifier.fillMaxWidth().weight(1f)
                 )
                 AbaPrincipal.YOUTUBE -> TelaYouTubeFeed(
-                    canaisYouTube, feedYtVideos, canalAtual, modoFeedYt, pastaYtAtual, pesquisaYt, carregandoYt,
+                    canaisYouTube, feedYtVideos, pastasYt, canalAtual, modoFeedYt, pastaYtAtual, pesquisaYt, carregandoYt,
                     { csvPicker.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv", "*/*")) },
-                    { modoFeedYt = it }, { pastaYtAtual = it }, { pesquisaYt = it }, { carregarFeedYt(pastaYtAtual) },
+                    { modoFeedYt = it }, { pastaYtAtual = it }, { nomeNovaPasta = ""; abrirDialogNovaPasta = true },
+                    { pesquisaYt = it }, { carregarFeedYt(pastaYtAtual) },
                     { v -> navegadorExpandido = false; canalAtual = Canal("yt_${v.videoId}", "${v.canalNome} · ${v.titulo}", "https://www.youtube.com/watch?v=${v.videoId}", v.thumbUrl, isWebSite = true, youtubeVideoId = v.videoId) },
+                    { v -> canalYtParaMover = canaisYouTube.firstOrNull { it.channelId == v.canalId } ?: CanalYouTube(v.canalId, v.canalNome, "https://www.youtube.com/channel/${v.canalId}", v.pasta) },
+                    { v -> atualizarCanaisYt(canaisYouTube.map { if (it.channelId == v.canalId) it.copy(favorito = !it.favorito) else it }) },
+                    { v -> canalYtParaDesinscrever = canaisYouTube.firstOrNull { it.channelId == v.canalId } ?: CanalYouTube(v.canalId, v.canalNome, "https://www.youtube.com/channel/${v.canalId}", v.pasta) },
                     { yt ->
                         carregandoYt = true
                         scope.launch {
@@ -455,7 +463,8 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                         }
                     },
                     { yt -> atualizarCanaisYt(canaisYouTube.map { if (it.channelId == yt.channelId) it.copy(favorito = !it.favorito) else it }) },
-                    { canalYtParaMover = it }, Modifier.fillMaxWidth().weight(1f)
+                    { canalYtParaMover = it }, { canalYtParaDesinscrever = it },
+                    Modifier.fillMaxWidth().weight(1f)
                 )
                 AbaPrincipal.FAVORITOS -> TelaFavoritos(
                     listaCanais, canalAtual, epgDados, { canalAtual = it },
@@ -469,8 +478,7 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
 
     canalParaMover?.let { mov ->
         AlertDialog(
-            onDismissRequest = { canalParaMover = null },
-            title = { Text("Mover para categoria:") },
+            onDismissRequest = { canalParaMover = null }, title = { Text("Mover para categoria:") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     CategoriaCanal.entries.forEach { dest ->
@@ -484,21 +492,66 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
             confirmButton = { TextButton(onClick = { canalParaMover = null }) { Text("Fechar") } }
         )
     }
+
     canalYtParaMover?.let { movYt ->
         AlertDialog(
-            onDismissRequest = { canalYtParaMover = null },
-            title = { Text("Mover para pasta:") },
+            onDismissRequest = { canalYtParaMover = null }, title = { Text("Mover '${movYt.nome}' para:") },
             text = {
-                LazyColumn(Modifier.heightIn(max = 300.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(pastasPocketTube.filter { it != "Todos" && it != "Favoritos" }) { pasta ->
-                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (movYt.pasta == pasta) Color(0xFF2E7D32) else Color(0xFF262632))
-                            .clickable { atualizarCanaisYt(canaisYouTube.map { if (it.channelId == movYt.channelId) it.copy(pasta = pasta) else it }); canalYtParaMover = null }.padding(12.dp)) {
-                            Text(pasta, color = Color.White, fontSize = 14.sp)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LazyColumn(Modifier.heightIn(max = 260.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(pastasYt.filter { it != "Todos" && it != "Favoritos" }) { pasta ->
+                            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (movYt.pasta == pasta) Color(0xFF2E7D32) else Color(0xFF262632))
+                                .clickable { moverCategoriaYt(movYt.channelId, pasta); canalYtParaMover = null }.padding(12.dp)) {
+                                Text(pasta, color = Color.White, fontSize = 14.sp)
+                            }
                         }
+                    }
+                    OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = { nomeNovaPasta = ""; abrirDialogNovaPasta = true }) {
+                        Text("+ Criar nova categoria")
                     }
                 }
             },
             confirmButton = { TextButton(onClick = { canalYtParaMover = null }) { Text("Fechar") } }
+        )
+    }
+
+    if (abrirDialogNovaPasta) {
+        AlertDialog(
+            onDismissRequest = { abrirDialogNovaPasta = false },
+            title = { Text("Nova Categoria no Feed") },
+            text = { CampoTextoCompacto(nomeNovaPasta, { nomeNovaPasta = it }, "Ex: Futebol, Culinária, Podcasts...") },
+            confirmButton = {
+                Button(enabled = nomeNovaPasta.isNotBlank(), onClick = {
+                    val limpa = nomeNovaPasta.trim()
+                    if (pastasYt.none { it.equals(limpa, true) }) {
+                        val nova = pastasYt + limpa; pastasYt = nova; salvarPastasYt(context, nova)
+                    }
+                    canalYtParaMover?.let { moverCategoriaYt(it.channelId, limpa); canalYtParaMover = null }
+                    abrirDialogNovaPasta = false; mensagemStatus = "Categoria '$limpa' criada!"
+                }) { Text("Criar") }
+            },
+            dismissButton = { TextButton(onClick = { abrirDialogNovaPasta = false }) { Text("Cancelar") } }
+        )
+    }
+
+    canalYtParaDesinscrever?.let { yt ->
+        AlertDialog(
+            onDismissRequest = { canalYtParaDesinscrever = null },
+            title = { Text("Desinscrever de ${yt.nome}?") },
+            text = { Text("Isso remove o canal e todos os vídeos dele do seu Feed neste aplicativo.") },
+            confirmButton = {
+                Button(colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)), onClick = {
+                    desinscreverCanalYt(yt); canalYtParaDesinscrever = null
+                }) { Text("Desinscrever") }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TextButton(onClick = {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/channel/${yt.channelId}")))
+                    }) { Text("Abrir no YT") }
+                    TextButton(onClick = { canalYtParaDesinscrever = null }) { Text("Cancelar") }
+                }
+            }
         )
     }
 }
