@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.*
@@ -46,22 +45,6 @@ fun BotaoAcao(texto: String, onClick: () -> Unit) {
             .clickable { onClick() }.padding(horizontal = 10.dp, vertical = 5.dp)
     ) {
         Text(texto, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
-fun LinhaFiltroSeekee(opcoes: List<String>, selecionado: String, aoSelecionar: (String) -> Unit) {
-    LazyRow(contentPadding = PaddingValues(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        items(opcoes) { op ->
-            val ativo = op == selecionado
-            Box(
-                modifier = Modifier.clip(RoundedCornerShape(12.dp))
-                    .background(if (ativo) Color(0xFF1F3A68) else Color.Transparent)
-                    .clickable { aoSelecionar(op) }.padding(horizontal = 10.dp, vertical = 4.dp)
-            ) {
-                Text(op, color = if (ativo) Color(0xFF64B5F6) else Color.LightGray, fontSize = 12.sp, fontWeight = if (ativo) FontWeight.Bold else FontWeight.Normal)
-            }
-        }
     }
 }
 
@@ -108,101 +91,40 @@ fun CardCanalLista(
 }
 
 @Composable
-fun TelaDetalheSeekee(
-    item: MidiaItem, episodios: List<EpisodioMidia>, temporadaSel: Int, episodioSel: Int,
-    semelhantes: List<MidiaItem>, onTemporada: (Int) -> Unit, onEpisodio: (Int) -> Unit,
-    onAssistirWeb: (MidiaItem, Int, Int) -> Unit, onFavoritar: (MidiaItem) -> Unit,
-    onAbrirPaginaInfo: (MidiaItem) -> Unit, onAbrirSemelhante: (MidiaItem) -> Unit,
+fun TelaInicioPlataformas(
+    onAbrirPlataforma: (PlataformaGratuita) -> Unit,
+    onAbrirCanaisBrasil: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val temporadas = episodios.map { it.temporada }.distinct().ifEmpty { listOf(1) }
-    val epsDaTemp = episodios.filter { it.temporada == temporadaSel }
-
-    LazyColumn(modifier = modifier, contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(modifier = modifier, contentPadding = PaddingValues(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
-            Text(item.titulo, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            Spacer(modifier = Modifier.height(4.dp))
-            Text("${item.tipo} · ${if (item.ano > 0) "${item.ano} · " else ""}${item.generos.joinToString(" · ")}", color = Color.Gray, fontSize = 12.sp)
-            if (item.sinopse.isNotBlank()) {
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(item.sinopse, color = Color.LightGray, fontSize = 12.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Catálogos Gratuitos", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                BotaoAcao("📺 TV Brasil (M3U)") { onAbrirCanaisBrasil() }
             }
         }
-        item {
+        items(plataformasGratuitas) { plat ->
             Row(
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFF191922)).padding(10.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFF191922))
+                    .clickable { onAbrirPlataforma(plat) }.padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onAssistirWeb(item, temporadaSel, episodioSel) }) {
-                    Text("▶", fontSize = 18.sp, color = Color(0xFF4CAF50))
-                    Text("Assistir Web", fontSize = 11.sp, color = Color.LightGray)
+                Box(
+                    modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).background(Color(plat.corHex)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(plat.icone, fontSize = 22.sp)
                 }
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onFavoritar(item) }) {
-                    Text("⭐", fontSize = 18.sp, color = Color(0xFFFFD54F))
-                    Text("Favoritar", fontSize = 11.sp, color = Color.LightGray)
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(plat.nome, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Spacer(Modifier.height(2.dp))
+                    Text(plat.subtitulo, color = Color.Gray, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                if (!item.webUrl.isNullOrBlank()) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onAbrirPaginaInfo(item) }) {
-                        Text("🌐", fontSize = 18.sp)
-                        Text("Página Info", fontSize = 11.sp, color = Color.LightGray)
-                    }
-                }
-            }
-        }
-        if (item.tipo != "Filmes") {
-            item {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(temporadas) { temp ->
-                        Box(
-                            modifier = Modifier.clip(RoundedCornerShape(10.dp))
-                                .background(if (temp == temporadaSel) Color(0xFF2962FF) else Color(0xFF22222C))
-                                .clickable { onTemporada(temp) }.padding(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
-                            Text("Temporada $temp", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                val totalCaps = if (epsDaTemp.isNotEmpty()) epsDaTemp.size else 12
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Episódios", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    Text("$totalCaps episódios", color = Color.Gray, fontSize = 12.sp)
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val numeros = if (epsDaTemp.isNotEmpty()) epsDaTemp.map { it.numero } else (1..12).toList()
-                    items(numeros) { num ->
-                        Box(
-                            modifier = Modifier.size(46.dp).clip(RoundedCornerShape(10.dp))
-                                .background(if (num == episodioSel) Color(0xFF424252) else Color(0xFF1F1F28))
-                                .clickable { onEpisodio(num); onAssistirWeb(item, temporadaSel, num) },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("$num", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        }
-                    }
-                }
-            }
-        }
-        if (semelhantes.isNotEmpty()) {
-            item {
-                Text("Títulos semelhantes", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                Spacer(modifier = Modifier.height(8.dp))
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(semelhantes) { sem ->
-                        Column(modifier = Modifier.width(105.dp).clickable { onAbrirSemelhante(sem) }) {
-                            Box(modifier = Modifier.fillMaxWidth().height(148.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF22222C))) {
-                                if (!sem.posterUrl.isNullOrBlank()) {
-                                    AsyncImage(model = sem.posterUrl, contentDescription = sem.titulo, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                                }
-                                Box(modifier = Modifier.padding(5.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xCC000000)).padding(horizontal = 5.dp, vertical = 2.dp)) {
-                                    Text("⭐ ${sem.nota}", color = Color(0xFFFFD54F), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(sem.titulo, color = Color.White, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
+                Box(
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFF2962FF)).padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Text("Abrir", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -210,137 +132,66 @@ fun TelaDetalheSeekee(
 }
 
 @Composable
-fun TelaBuscaSeekee(
-    carregando: Boolean, resultado: BuscaSeekeeResultado,
-    onAbrirMidia: (MidiaItem) -> Unit, onAbrirWeb: (ResultadoWeb) -> Unit, onBuscaCompletaWeb: () -> Unit,
+fun TelaFontesWebBusca(
+    query: String,
+    carregando: Boolean,
+    linksWeb: List<ResultadoWeb>,
+    onBuscarNaPlataforma: (PlataformaGratuita) -> Unit,
+    onAbrirFonteWeb: (ResultadoWeb) -> Unit,
+    onBuscaCompletaWeb: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    if (carregando) {
-        Box(modifier = modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Color(0xFF2962FF)) }
-        return
-    }
-    LazyColumn(modifier = modifier, contentPadding = PaddingValues(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        items(resultado.midias) { item ->
-            Column(
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFF171720))
-                    .clickable { onAbrirMidia(item) }.padding(12.dp)
-            ) {
-                Text(item.titulo, color = Color(0xFF64B5F6), fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("${item.tipo} · ${if (item.ano > 0) "${item.ano} · " else ""}${item.generos.take(3).joinToString(" · ")}", color = Color.LightGray, fontSize = 12.sp)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(item.sinopse.ifBlank { "Toque para ver episódios, fontes e detalhes." }, color = Color.Gray, fontSize = 12.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+    LazyColumn(modifier = modifier, contentPadding = PaddingValues(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item {
+            Text("Buscar \"$query\" nas plataformas:", color = Color.LightGray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(6.dp))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(plataformasGratuitas) { plat ->
+                    Box(
+                        modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(Color(plat.corHex))
+                            .clickable { onBuscarNaPlataforma(plat) }.padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Text("${plat.icone} ${plat.nome}", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
-                    if (!item.posterUrl.isNullOrBlank()) {
-                        Spacer(modifier = Modifier.width(10.dp))
-                        AsyncImage(model = item.posterUrl, contentDescription = item.titulo, contentScale = ContentScale.Crop,
-                            modifier = Modifier.size(width = 86.dp, height = 120.dp).clip(RoundedCornerShape(10.dp)))
-                    }
-                }
-                Spacer(modifier = Modifier.height(10.dp))
-                Button(
-                    modifier = Modifier.fillMaxWidth().height(40.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF252532)),
-                    onClick = { onAbrirMidia(item) }
-                ) {
-                    Text("Assistir / Ver Episódios  >", color = Color.White, fontSize = 13.sp)
                 }
             }
         }
-        items(resultado.linksWeb) { web ->
-            Column(
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFF15151C))
-                    .clickable { onAbrirWeb(web) }.padding(12.dp)
-            ) {
-                Text(web.titulo, color = Color(0xFF64B5F6), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                if (web.resumo.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(web.resumo, color = Color.LightGray, fontSize = 12.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        item {
+            Spacer(Modifier.height(4.dp))
+            Text("Fontes de sites encontradas:", color = Color.LightGray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        }
+        if (carregando) {
+            item {
+                Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Color(0xFF2962FF))
                 }
-                Spacer(modifier = Modifier.height(6.dp))
-                Text("🌐 ${web.dominio}", color = Color.Gray, fontSize = 11.sp)
+            }
+        } else if (linksWeb.isEmpty()) {
+            item {
+                Text("Nenhuma fonte direta encontrada. Toque em uma plataforma acima ou no botão abaixo.", color = Color.Gray, fontSize = 12.sp)
+            }
+        } else {
+            items(linksWeb) { web ->
+                Column(
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFF171720))
+                        .clickable { onAbrirFonteWeb(web) }.padding(12.dp)
+                ) {
+                    Text(web.titulo, color = Color(0xFF64B5F6), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (web.resumo.isNotBlank()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(web.resumo, color = Color.LightGray, fontSize = 12.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("🌐 ${web.dominio}", color = Color.Gray, fontSize = 11.sp)
+                        Text("Abrir fonte >", color = Color(0xFF66BB6A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
         }
         item {
             OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = onBuscaCompletaWeb) {
-                Text("🌐 Abrir busca completa no Navegador", fontSize = 12.sp)
-            }
-        }
-    }
-}
-
-@Composable
-fun TelaCatalogoSeekee(
-    modoAba: String, tipoPopular: String, carregando: Boolean, catalogo: List<MidiaItem>,
-    catOrd: String, catTipo: String, catGen: String, catPais: String, catAno: String,
-    onMudarModoAba: (String) -> Unit, onMudarTipoPopular: (String) -> Unit,
-    onCatOrd: (String) -> Unit, onCatTipo: (String) -> Unit, onCatGen: (String) -> Unit,
-    onCatPais: (String) -> Unit, onCatAno: (String) -> Unit, onAbrirMidia: (MidiaItem) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(modifier = modifier) {
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-            listOf("Populares" to "Pesquisas populares", "Categorias" to "Categorias").forEach { (chave, rotulo) ->
-                val ativo = modoAba == chave
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onMudarModoAba(chave) }) {
-                    Text(rotulo, color = if (ativo) Color.White else Color.Gray, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Box(modifier = Modifier.width(if (ativo) 28.dp else 0.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(Color.White))
-                }
-            }
-        }
-        if (modoAba == "Populares") {
-            LazyRow(contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(listOf("Pra você", "Filmes", "Séries", "Anime", "Novelas", "Documentários")) { tipo ->
-                    val sel = tipo == tipoPopular
-                    Box(
-                        modifier = Modifier.clip(RoundedCornerShape(18.dp)).background(if (sel) Color(0xFF2962FF) else Color.Transparent)
-                            .clickable { onMudarTipoPopular(tipo) }.padding(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        Text(tipo, color = if (sel) Color.White else Color.LightGray, fontSize = 13.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal)
-                    }
-                }
-            }
-        } else {
-            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                LinhaFiltroSeekee(listOf("Mais buscados", "Recentes", "Alta Nota"), catOrd, onCatOrd)
-                LinhaFiltroSeekee(listOf("Tudo", "Filmes", "Séries", "Anime", "Novelas", "Documentários"), catTipo, onCatTipo)
-                LinhaFiltroSeekee(listOf("Tudo", "Ação", "Drama", "Comédia", "Terror", "Suspense", "Ficção", "Animação"), catGen, onCatGen)
-                LinhaFiltroSeekee(listOf("Tudo", "EUA", "Brasil", "Coreia", "Japão", "México"), catPais, onCatPais)
-                LinhaFiltroSeekee(listOf("Tudo", "2026", "2025", "2024", "2023", "2022"), catAno, onCatAno)
-            }
-        }
-        if (carregando) {
-            Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Color(0xFF2962FF)) }
-        } else {
-            LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f), contentPadding = PaddingValues(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                itemsIndexed(catalogo) { index, item ->
-                    Row(modifier = Modifier.fillMaxWidth().clickable { onAbrirMidia(item) }.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(modifier = Modifier.size(width = 68.dp, height = 96.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF22222C))) {
-                            if (!item.posterUrl.isNullOrBlank()) {
-                                AsyncImage(model = item.posterUrl, contentDescription = item.titulo, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                            }
-                            val cor = when (index) { 0 -> Color(0xFFE53935); 1 -> Color(0xFFFB8C00); 2 -> Color(0xFFFFB300); else -> Color(0xAA333340) }
-                            Box(modifier = Modifier.clip(RoundedCornerShape(bottomEnd = 8.dp)).background(cor).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                                Text("${index + 1}", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(item.titulo, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("🔥 ${item.popularidade}", color = Color(0xFFFF7043), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text("${if (item.ano > 0) "${item.ano} · " else ""}${item.pais} · ${item.generos.take(3).joinToString(" · ")}", color = Color.LightGray, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(item.tipo, color = Color.Gray, fontSize = 12.sp)
-                        }
-                    }
-                }
+                Text("🌐 Abrir pesquisa completa no navegador", fontSize = 12.sp)
             }
         }
     }
