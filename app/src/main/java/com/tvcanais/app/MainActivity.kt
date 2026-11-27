@@ -49,6 +49,8 @@ import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.YouTubePlayer
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.listeners.AbstractYouTubePlayerListener
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.options.IFramePlayerOptions
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.views.YouTubePlayerView
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import java.net.URLEncoder
 
@@ -148,13 +150,45 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
     fun carregarListaM3u(url: String, rotulo: String) {
         carregandoTv = true; mensagemStatus = "Baixando $rotulo..."
         scope.launch {
-            val novos = processarLink(url)
-            if (novos.size > 1) {
+            val validos = processarLink(url).filter { !it.isWebSite && !it.url.endsWith(".m3u", true) }
+            if (validos.isNotEmpty()) {
+                val existentes = listaCanais.map { it.url }.toSet()
+                val novos = validos.filterNot { it.url in existentes }
                 atualizarCanais(novos + listaCanais)
-                canalAtual = novos.first()
+                canalAtual = validos.first()
                 pesquisaTv = ""
-                mensagemStatus = "${novos.size} canais ($rotulo) carregados!"
-            } else mensagemStatus = "Erro ao baixar $rotulo."
+                mensagemStatus = "${novos.size} novos canais ($rotulo)!"
+            } else {
+                mensagemStatus = "Lista '$rotulo' indisponível no momento."
+            }
+            carregandoTv = false
+        }
+    }
+
+    fun carregarTodasListas() {
+        val fontes = listOf(
+            "https://github.com/iptv-com/iptv/raw/refs/heads/main/lists/brazil.m3u",
+            "https://github.com/iptv-com/iptv/raw/main/lists/abertos.m3u",
+            "https://raw.githubusercontent.com/helenfernanda/gratis/main/iptvlegal.m3u",
+            "https://tv.meuted.io/iptvlegal.m3u",
+            "https://iptv-org.github.io/iptv/countries/br.m3u",
+            "https://raw.githubusercontent.com/iptv-org/iptv/master/streams/br_pluto.m3u"
+        )
+        carregandoTv = true; mensagemStatus = "Baixando todas as listas grátis..."
+        scope.launch {
+            val baixados = fontes.map { u -> async { processarLink(u) } }.awaitAll()
+                .flatten()
+                .filter { !it.isWebSite && !it.url.endsWith(".m3u", true) }
+                .distinctBy { it.url }
+            val existentes = listaCanais.map { it.url }.toSet()
+            val novos = baixados.filterNot { it.url in existentes }
+            if (baixados.isNotEmpty()) {
+                atualizarCanais(novos + listaCanais)
+                if (canalAtual == null) canalAtual = baixados.first()
+                mensagemStatus = "${novos.size} canais novos carregados (total: ${novos.size + listaCanais.size})!"
+            } else {
+                mensagemStatus = "Não foi possível baixar as listas agora."
+            }
             carregandoTv = false
         }
     }
@@ -171,9 +205,7 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
         if (q.startsWith("http://", true) || q.startsWith("https://", true)) {
             abrirSiteNoNavegador(q.take(36), q); return
         }
-        emBuscaFontes = true
-        navegadorExpandido = false
-        carregandoBusca = true
+        emBuscaFontes = true; navegadorExpandido = false; carregandoBusca = true
         scope.launch {
             linksWebBusca = buscarWebDuckDuckGo("$q assistir dublado portugues")
             carregandoBusca = false
@@ -397,8 +429,8 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                     } else {
                         TelaInicioCanais(
                             listaCanais, canalAtual, epgDados, carregandoTv,
-                            { carregarListaM3u("https://iptv-org.github.io/iptv/countries/br.m3u", "Canais BR") },
-                            { carregarListaM3u("https://raw.githubusercontent.com/iptv-org/iptv/master/streams/br_pluto.m3u", "Pluto TV BR") },
+                            { url, nome -> carregarListaM3u(url, nome) },
+                            { carregarTodasListas() },
                             { atualizarCanais(emptyList()); canalAtual = null },
                             { canalAtual = it },
                             { c -> atualizarCanais(listaCanais.map { if (it.id == c.id) it.copy(favorito = !it.favorito) else it }) },
@@ -411,7 +443,7 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                 AbaPrincipal.TV -> TelaTvAoVivo(
                     listaCanais, canalAtual, epgDados, pesquisaTv, linkDigitadoTv, carregandoTv,
                     { pesquisaTv = it }, { linkDigitadoTv = it },
-                    { carregarListaM3u("https://iptv-org.github.io/iptv/countries/br.m3u", "Canais BR") },
+                    { carregarTodasListas() },
                     { atualizarCanais(emptyList()); canalAtual = null },
                     { raw ->
                         carregandoTv = true
