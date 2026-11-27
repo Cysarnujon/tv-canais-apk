@@ -91,6 +91,18 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+fun montarHtmlIframeYoutube(videoId: String): String = """
+    <!DOCTYPE html><html><head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <style>html,body{margin:0;padding:0;width:100%;height:100%;background:#000;overflow:hidden;}iframe{width:100%;height:100%;border:0;}</style>
+    </head><body>
+    <iframe src="https://www.youtube.com/embed/$videoId?autoplay=1&playsinline=1&rel=0&enablejsapi=1&origin=https://com.tvcanais.app"
+    referrerpolicy="strict-origin-when-cross-origin"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+    </body></html>
+""".trimIndent()
+
 @Composable
 fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
     val context = LocalContext.current
@@ -100,6 +112,7 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
     var canalAtual by remember { mutableStateOf<Canal?>(null) }
     var telaCheia by remember { mutableStateOf(false) }
     var mostrarSiteCompleto by remember { mutableStateOf(false) }
+    var modoYoutubeWebDireto by remember { mutableStateOf(false) }
     var mensagemStatus by remember { mutableStateOf<String?>(null) }
 
     var listaCanais by remember {
@@ -221,6 +234,7 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
     }
     DisposableEffect(Unit) { onDispose { exoPlayer.release() } }
     LaunchedEffect(canalAtual) {
+        modoYoutubeWebDireto = false
         val c = canalAtual
         if (c != null && !c.isWebSite) { exoPlayer.setMediaItem(MediaItem.fromUri(c.url)); exoPlayer.prepare(); exoPlayer.playWhenReady = true }
         else exoPlayer.pause()
@@ -253,6 +267,7 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                     Text("TV & Seekee Player", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
                 } else if (atual.isWebSite) {
                     var capturou by remember(atual.url) { mutableStateOf(false) }
+                    val chaveCarga = "${atual.url}_$modoYoutubeWebDireto"
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
                         factory = { ctx ->
@@ -266,23 +281,32 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                                     override fun shouldInterceptRequest(v: WebView?, r: WebResourceRequest?): WebResourceResponse? {
                                         if (atual.youtubeVideoId != null) return super.shouldInterceptRequest(v, r)
                                         val u = r?.url?.toString() ?: return null
-                                        if ((u.contains(".m3u8", true) || u.contains(".mpd", true)) && !u.contains("doubleclick", true) && !capturou && !mostrarSiteCompleto) {
+                                        val ehMidia = u.contains(".m3u8", true) || u.contains(".mpd", true) || u.contains(".mp4", true)
+                                        val ehAnuncio = u.contains("doubleclick", true) || u.contains("googlesyndication", true) || u.contains("ads", true)
+                                        if (ehMidia && !ehAnuncio && !capturou && !mostrarSiteCompleto) {
                                             capturou = true; v?.post { canalAtual = atual.copy(url = u, isWebSite = false, webOriginalUrl = atual.url) }
                                         }
                                         return super.shouldInterceptRequest(v, r)
                                     }
                                     override fun onPageFinished(v: WebView?, url: String?) {
-                                        if (!mostrarSiteCompleto && atual.youtubeVideoId == null) {
+                                        if (!mostrarSiteCompleto && (atual.youtubeVideoId == null || modoYoutubeWebDireto)) {
                                             v?.evaluateJavascript("(function(){function f(){var x=document.querySelector('video');if(x){x.style.position='fixed';x.style.top='0';x.style.left='0';x.style.width='100vw';x.style.height='100vh';x.style.zIndex='2147483647';x.style.background='#000';x.style.objectFit='contain';x.controls=true;}}f();setInterval(f,1500);})();", null)
                                         }
                                     }
                                 }
-                                if (atual.youtubeVideoId != null) loadUrl(atual.url, mapOf("Referer" to "https://www.youtube.com/")) else loadUrl(atual.url)
                             }
                         },
                         update = { wv ->
-                            if (wv.url != atual.url) {
-                                if (atual.youtubeVideoId != null) wv.loadUrl(atual.url, mapOf("Referer" to "https://www.youtube.com/")) else wv.loadUrl(atual.url)
+                            if (wv.tag != chaveCarga) {
+                                wv.tag = chaveCarga
+                                val ytId = atual.youtubeVideoId
+                                if (ytId != null && !modoYoutubeWebDireto) {
+                                    wv.loadDataWithBaseURL("https://com.tvcanais.app", montarHtmlIframeYoutube(ytId), "text/html", "utf-8", null)
+                                } else if (ytId != null) {
+                                    wv.loadUrl("https://m.youtube.com/watch?v=$ytId")
+                                } else {
+                                    wv.loadUrl(atual.url)
+                                }
                             }
                         }
                     )
@@ -298,6 +322,8 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                     Text(canalAtual!!.nome, color = Color(0xFF66BB6A), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     Spacer(Modifier.width(6.dp))
                     if (canalAtual!!.youtubeVideoId != null) {
+                        BotaoAcao(if (modoYoutubeWebDireto) "Player 1" else "Player 2") { modoYoutubeWebDireto = !modoYoutubeWebDireto }
+                        Spacer(Modifier.width(6.dp))
                         BotaoAcao("YT App") { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=${canalAtual!!.youtubeVideoId}"))) }
                         Spacer(Modifier.width(6.dp))
                     } else if (canalAtual!!.isWebSite) {
@@ -343,8 +369,12 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                             midiaAberta!!, episodiosMidia, tempSel, epSel, seekeeCatalogo.filter { it.id != midiaAberta!!.id }.take(10),
                             { tempSel = it }, { epSel = it },
                             { it, t, e ->
-                                val enc = URLEncoder.encode("${it.titulo} temporada $t episodio $e assistir online", "UTF-8")
-                                mostrarSiteCompleto = true; canalAtual = Canal("${it.id}_${t}_$e", "${it.titulo} · T$t E$e", "https://duckduckgo.com/?q=$enc", it.posterUrl, isWebSite = true)
+                                scope.launch {
+                                    mensagemStatus = "Localizando fonte de vídeo..."
+                                    mostrarSiteCompleto = false
+                                    canalAtual = buscarVideoParaEpisodioSeekee(it, t, e, listaCanais)
+                                    mensagemStatus = null
+                                }
                             },
                             { it ->
                                 val fav = Canal("fav_${it.id}", it.titulo, it.trailerUrl ?: it.webUrl ?: "https://duckduckgo.com/?q=${URLEncoder.encode(it.titulo, "UTF-8")}",
@@ -357,7 +387,7 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                         )
                         seekeeEmBusca -> TelaBuscaSeekee(
                             carregandoSeekee, seekeeResultadoBusca, { abrirDetalhe(it) },
-                            { w -> mostrarSiteCompleto = true; canalAtual = Canal(nome = w.titulo, url = w.url, isWebSite = true) },
+                            { w -> mostrarSiteCompleto = false; canalAtual = Canal(nome = w.titulo, url = w.url, isWebSite = true) },
                             { val e = URLEncoder.encode(seekeeQuery.trim(), "UTF-8"); mostrarSiteCompleto = true; canalAtual = Canal(nome = "Busca: $seekeeQuery", url = "https://duckduckgo.com/?q=$e", isWebSite = true) },
                             Modifier.fillMaxWidth().weight(1f)
                         )
