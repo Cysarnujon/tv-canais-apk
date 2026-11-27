@@ -26,7 +26,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -101,6 +100,7 @@ class MainActivity : ComponentActivity() {
 fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
 
     var abaPrincipal by remember { mutableStateOf(AbaPrincipal.NAVEGADOR) }
     var canalAtual by remember { mutableStateOf<Canal?>(null) }
@@ -243,8 +243,9 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
         }
     }
 
-    BackHandler(enabled = telaCheia || navegadorExpandido || emBuscaFontes) {
+    BackHandler(enabled = drawerState.isOpen || telaCheia || navegadorExpandido || emBuscaFontes) {
         when {
+            drawerState.isOpen -> scope.launch { drawerState.close() }
             telaCheia -> { telaCheia = false; activity.alterarTelaCheia(false) }
             navegadorExpandido -> if (webViewRef?.canGoBack() == true) webViewRef?.goBack() else navegadorExpandido = false
             emBuscaFontes -> emBuscaFontes = false
@@ -279,199 +280,232 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
 
     val playerExpandido = isInPip || telaCheia
 
-    Column(
-        modifier = Modifier.fillMaxSize().background(Color(0xFF0E0E12))
-            .then(if (playerExpandido) Modifier else Modifier.statusBarsPadding().navigationBarsPadding())
-    ) {
-        if (canalAtual != null || abaPrincipal != AbaPrincipal.NAVEGADOR || playerExpandido) {
-            val modifierBox = when {
-                playerExpandido -> Modifier.fillMaxSize().background(Color.Black)
-                navegadorExpandido -> Modifier.fillMaxWidth().weight(1f).background(Color.Black)
-                else -> Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black)
-            }
-            Box(modifier = modifierBox, contentAlignment = Alignment.Center) {
-                val atual = canalAtual
-                if (atual == null) {
-                    Text("TV & Canais", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                } else if (atual.youtubeVideoId != null) {
-                    AndroidView(
-                        modifier = Modifier.fillMaxSize(),
-                        factory = { ctx ->
-                            YouTubePlayerView(ctx).apply {
-                                enableAutomaticInitialization = false; activity.lifecycle.addObserver(this)
-                                val options = IFramePlayerOptions.Builder(ctx).controls(1).rel(0).build()
-                                initialize(object : AbstractYouTubePlayerListener() {
-                                    override fun onReady(youTubePlayer: YouTubePlayer) {
-                                        ytPlayerRef = youTubePlayer
-                                        canalAtual?.youtubeVideoId?.let { vid -> lastLoadedYtId = vid; youTubePlayer.loadVideo(vid, 0f) }
-                                    }
-                                }, options)
-                            }
-                        },
-                        onRelease = { ytView -> ytPlayerRef = null; lastLoadedYtId = null; activity.lifecycle.removeObserver(ytView); ytView.release() }
-                    )
-                } else if (atual.isWebSite) {
-                    var capturou by remember(atual.url) { mutableStateOf(false) }
-                    AndroidView(
-                        modifier = Modifier.fillMaxSize(),
-                        factory = { ctx ->
-                            WebView(ctx).apply {
-                                webViewRef = this; settings.javaScriptEnabled = true; settings.domStorageEnabled = true
-                                settings.useWideViewPort = true; settings.loadWithOverviewMode = true; settings.mediaPlaybackRequiresUserGesture = false
-                                webChromeClient = object : WebChromeClient() { override fun onPermissionRequest(r: PermissionRequest?) { r?.grant(r.resources) } }
-                                webViewClient = object : WebViewClient() {
-                                    override fun shouldInterceptRequest(v: WebView?, r: WebResourceRequest?): WebResourceResponse? {
-                                        val u = r?.url?.toString() ?: return null
-                                        val ehMidia = u.contains(".m3u8", true) || u.contains(".mpd", true) || u.contains(".mp4", true)
-                                        val ehAnuncio = u.contains("doubleclick", true) || u.contains("googlesyndication", true) || u.contains("ads", true)
-                                        if (ehMidia && !ehAnuncio && !capturou && !mostrarSiteCompleto) {
-                                            capturou = true; v?.post { canalAtual = atual.copy(url = u, isWebSite = false, webOriginalUrl = atual.url) }
-                                        }
-                                        return super.shouldInterceptRequest(v, r)
-                                    }
-                                    override fun onPageFinished(v: WebView?, url: String?) {
-                                        if (!mostrarSiteCompleto) {
-                                            v?.evaluateJavascript("(function(){function f(){var x=document.querySelector('video');if(x){x.style.position='fixed';x.style.top='0';x.style.left='0';x.style.width='100vw';x.style.height='100vh';x.style.zIndex='2147483647';x.style.background='#000';x.style.objectFit='contain';x.controls=true;}}f();setInterval(f,1500);})();", null)
-                                        }
-                                    }
-                                }
-                            }
-                        },
-                        update = { wv -> webViewRef = wv; if (wv.tag != atual.url) { wv.tag = atual.url; wv.loadUrl(atual.url) } }
-                    )
-                } else {
-                    AndroidView(modifier = Modifier.fillMaxSize(), factory = { ctx -> PlayerView(ctx).apply { player = exoPlayer; useController = true } })
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        gesturesEnabled = !playerExpandido && !navegadorExpandido,
+        drawerContent = {
+            ModalDrawerSheet(drawerContainerColor = Color(0xFF14141C)) {
+                Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
+                    Text("📺 TV & Mídia", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Text("Menu Principal", color = Color.Gray, fontSize = 12.sp)
                 }
-                if (telaCheia && !isInPip) Box(Modifier.align(Alignment.TopEnd).padding(16.dp)) { BotaoAcao("✕ Sair") { telaCheia = false; activity.alterarTelaCheia(false) } }
-            }
-
-            if (!playerExpandido && canalAtual != null) {
-                Row(Modifier.fillMaxWidth().background(Color(0xFF16161E)).padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (canalAtual!!.isWebSite && canalAtual!!.youtubeVideoId == null) {
-                        BotaoAcao("←") { if (webViewRef?.canGoBack() == true) webViewRef?.goBack() }; Spacer(Modifier.width(4.dp))
-                    }
-                    Text(canalAtual!!.nome, color = Color(0xFF66BB6A), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                    Spacer(Modifier.width(4.dp))
-                    if (canalAtual!!.isWebSite && canalAtual!!.youtubeVideoId == null) {
-                        BotaoAcao(if (navegadorExpandido) "16:9" else "Expandir") { navegadorExpandido = !navegadorExpandido }; Spacer(Modifier.width(4.dp))
-                        BotaoAcao(if (mostrarSiteCompleto) "Focar" else "Site") { mostrarSiteCompleto = !mostrarSiteCompleto; canalAtual = canalAtual!!.copy() }; Spacer(Modifier.width(4.dp))
-                    }
-                    BotaoAcao("PiP") { activity.entrarModoPip() }; Spacer(Modifier.width(4.dp))
-                    BotaoAcao("Tela Cheia") { telaCheia = true; activity.alterarTelaCheia(true) }; Spacer(Modifier.width(4.dp))
-                    BotaoAcao("✕") { navegadorExpandido = false; canalAtual = null }
+                HorizontalDivider(color = Color(0xFF282834))
+                Spacer(Modifier.height(8.dp))
+                AbaPrincipal.entries.forEach { aba ->
+                    val sel = aba == abaPrincipal
+                    NavigationDrawerItem(
+                        label = {
+                            Text(
+                                text = "${aba.icone}  ${aba.titulo}",
+                                fontSize = 15.sp,
+                                fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal
+                            )
+                        },
+                        selected = sel,
+                        onClick = {
+                            abaPrincipal = aba
+                            navegadorExpandido = false
+                            scope.launch { drawerState.close() }
+                        },
+                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                    )
                 }
             }
         }
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().background(Color(0xFF0E0E12))
+                .then(if (playerExpandido) Modifier else Modifier.statusBarsPadding().navigationBarsPadding())
+        ) {
+            if (canalAtual != null || abaPrincipal != AbaPrincipal.NAVEGADOR || playerExpandido) {
+                val modifierBox = when {
+                    playerExpandido -> Modifier.fillMaxSize().background(Color.Black)
+                    navegadorExpandido -> Modifier.fillMaxWidth().weight(1f).background(Color.Black)
+                    else -> Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black)
+                }
+                Box(modifier = modifierBox, contentAlignment = Alignment.Center) {
+                    val atual = canalAtual
+                    if (atual == null) {
+                        Text("TV & Canais", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    } else if (atual.youtubeVideoId != null) {
+                        AndroidView(
+                            modifier = Modifier.fillMaxSize(),
+                            factory = { ctx ->
+                                YouTubePlayerView(ctx).apply {
+                                    enableAutomaticInitialization = false; activity.lifecycle.addObserver(this)
+                                    val options = IFramePlayerOptions.Builder(ctx).controls(1).rel(0).build()
+                                    initialize(object : AbstractYouTubePlayerListener() {
+                                        override fun onReady(youTubePlayer: YouTubePlayer) {
+                                            ytPlayerRef = youTubePlayer
+                                            canalAtual?.youtubeVideoId?.let { vid -> lastLoadedYtId = vid; youTubePlayer.loadVideo(vid, 0f) }
+                                        }
+                                    }, options)
+                                }
+                            },
+                            onRelease = { ytView -> ytPlayerRef = null; lastLoadedYtId = null; activity.lifecycle.removeObserver(ytView); ytView.release() }
+                        )
+                    } else if (atual.isWebSite) {
+                        var capturou by remember(atual.url) { mutableStateOf(false) }
+                        AndroidView(
+                            modifier = Modifier.fillMaxSize(),
+                            factory = { ctx ->
+                                WebView(ctx).apply {
+                                    webViewRef = this; settings.javaScriptEnabled = true; settings.domStorageEnabled = true
+                                    settings.useWideViewPort = true; settings.loadWithOverviewMode = true; settings.mediaPlaybackRequiresUserGesture = false
+                                    webChromeClient = object : WebChromeClient() { override fun onPermissionRequest(r: PermissionRequest?) { r?.grant(r.resources) } }
+                                    webViewClient = object : WebViewClient() {
+                                        override fun shouldInterceptRequest(v: WebView?, r: WebResourceRequest?): WebResourceResponse? {
+                                            val u = r?.url?.toString() ?: return null
+                                            val ehMidia = u.contains(".m3u8", true) || u.contains(".mpd", true) || u.contains(".mp4", true)
+                                            val ehAnuncio = u.contains("doubleclick", true) || u.contains("googlesyndication", true) || u.contains("ads", true)
+                                            if (ehMidia && !ehAnuncio && !capturou && !mostrarSiteCompleto) {
+                                                capturou = true; v?.post { canalAtual = atual.copy(url = u, isWebSite = false, webOriginalUrl = atual.url) }
+                                            }
+                                            return super.shouldInterceptRequest(v, r)
+                                        }
+                                        override fun onPageFinished(v: WebView?, url: String?) {
+                                            if (!mostrarSiteCompleto) {
+                                                v?.evaluateJavascript("(function(){function f(){var x=document.querySelector('video');if(x){x.style.position='fixed';x.style.top='0';x.style.left='0';x.style.width='100vw';x.style.height='100vh';x.style.zIndex='2147483647';x.style.background='#000';x.style.objectFit='contain';x.controls=true;}}f();setInterval(f,1500);})();", null)
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            update = { wv -> webViewRef = wv; if (wv.tag != atual.url) { wv.tag = atual.url; wv.loadUrl(atual.url) } }
+                        )
+                    } else {
+                        AndroidView(modifier = Modifier.fillMaxSize(), factory = { ctx -> PlayerView(ctx).apply { player = exoPlayer; useController = true } })
+                    }
+                    if (telaCheia && !isInPip) Box(Modifier.align(Alignment.TopEnd).padding(16.dp)) { BotaoAcao("✕ Sair") { telaCheia = false; activity.alterarTelaCheia(false) } }
+                }
 
-        if (!playerExpandido && !navegadorExpandido) {
-            LazyRow(Modifier.fillMaxWidth().background(Color(0xFF121218)).padding(vertical = 7.dp), contentPadding = PaddingValues(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(AbaPrincipal.entries) { aba ->
-                    val sel = aba == abaPrincipal
-                    Box(Modifier.clip(RoundedCornerShape(20.dp)).background(if (sel) Color(0xFF2962FF) else Color(0xFF22222C))
-                        .clickable { abaPrincipal = aba }.padding(horizontal = 12.dp, vertical = 6.dp)) {
-                        Text("${aba.icone} ${aba.titulo}", color = Color.White, fontSize = 12.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal)
+                if (!playerExpandido && canalAtual != null) {
+                    Row(Modifier.fillMaxWidth().background(Color(0xFF16161E)).padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (canalAtual!!.isWebSite && canalAtual!!.youtubeVideoId == null) {
+                            BotaoAcao("←") { if (webViewRef?.canGoBack() == true) webViewRef?.goBack() }; Spacer(Modifier.width(4.dp))
+                        }
+                        Text(canalAtual!!.nome, color = Color(0xFF66BB6A), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        Spacer(Modifier.width(4.dp))
+                        if (canalAtual!!.isWebSite && canalAtual!!.youtubeVideoId == null) {
+                            BotaoAcao(if (navegadorExpandido) "16:9" else "Expandir") { navegadorExpandido = !navegadorExpandido }; Spacer(Modifier.width(4.dp))
+                            BotaoAcao(if (mostrarSiteCompleto) "Focar" else "Site") { mostrarSiteCompleto = !mostrarSiteCompleto; canalAtual = canalAtual!!.copy() }; Spacer(Modifier.width(4.dp))
+                        }
+                        BotaoAcao("PiP") { activity.entrarModoPip() }; Spacer(Modifier.width(4.dp))
+                        BotaoAcao("Tela Cheia") { telaCheia = true; activity.alterarTelaCheia(true) }; Spacer(Modifier.width(4.dp))
+                        BotaoAcao("✕") { navegadorExpandido = false; canalAtual = null }
                     }
                 }
             }
-            if (mensagemStatus != null) Text(mensagemStatus!!, color = Color(0xFFFFB74D), fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp))
 
-            when (abaPrincipal) {
-                AbaPrincipal.NAVEGADOR -> Column(Modifier.fillMaxWidth().weight(1f)) {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        if (emBuscaFontes) { BotaoAcao("←") { emBuscaFontes = false }; Spacer(Modifier.width(6.dp)) }
-                        CampoTextoCompacto(homeQuery, { homeQuery = it }, "🔍 Pesquisar filme, série, novela ou canal...", Modifier.weight(1f))
-                        Spacer(Modifier.width(6.dp))
-                        Button(enabled = !carregandoBusca && homeQuery.isNotBlank(), modifier = Modifier.height(40.dp), contentPadding = PaddingValues(14.dp, 0.dp), onClick = { pesquisarFontesWeb(homeQuery) }) {
-                            Text(if (carregandoBusca) "..." else "Ir", fontSize = 12.sp)
-                        }
-                    }
-                    if (emBuscaFontes) {
-                        val canaisLocais = remember(listaCanais, homeQuery) {
-                            val q = homeQuery.trim(); if (q.isEmpty()) emptyList() else listaCanais.filter { it.nome.contains(q, true) }
-                        }
-                        TelaFontesWebBusca(
-                            homeQuery, carregandoBusca, canaisLocais, canalAtual, epgDados, linksWebBusca,
-                            { canalAtual = it }, { c -> atualizarCanais(listaCanais.map { if (it.id == c.id) it.copy(favorito = !it.favorito) else it }) },
-                            { canalParaMover = it }, { c -> atualizarCanais(listaCanais.filterNot { it.id == c.id }) },
-                            { web -> abrirSiteNoNavegador(web.titulo, web.url) },
-                            { abrirSiteNoNavegador("Busca: $homeQuery", "https://duckduckgo.com/?q=${URLEncoder.encode("$homeQuery assistir dublado portugues", "UTF-8")}") },
-                            Modifier.fillMaxWidth().weight(1f)
-                        )
-                    } else {
-                        TelaInicioCanais(
-                            listaCanais, canalAtual, epgDados, carregandoTv,
-                            { url, nome -> carregarListaM3u(url, nome) }, { carregarTodasListas() },
-                            { atualizarCanais(emptyList()); canalAtual = null }, { canalAtual = it },
-                            { c -> atualizarCanais(listaCanais.map { if (it.id == c.id) it.copy(favorito = !it.favorito) else it }) },
-                            { canalParaMover = it }, { c -> atualizarCanais(listaCanais.filterNot { it.id == c.id }) },
-                            Modifier.fillMaxWidth().weight(1f)
-                        )
-                    }
+            if (!playerExpandido && !navegadorExpandido) {
+                // BARRA DE TOPO COM BOTÃO DA BARRA LATERAL (☰)
+                Row(
+                    modifier = Modifier.fillMaxWidth().background(Color(0xFF121218)).padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    BotaoAcao("☰") { scope.launch { drawerState.open() } }
+                    Spacer(Modifier.width(10.dp))
+                    Text("${abaPrincipal.icone} ${abaPrincipal.titulo}", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 }
-                AbaPrincipal.JELLYFIN -> TelaJellyfin(
-                    jellyfinCfg, { nova -> jellyfinCfg = nova; salvarJellyfinConfig(context, nova) },
-                    { c -> navegadorExpandido = false; canalAtual = c }, { urlWeb -> abrirSiteNoNavegador("Jellyfin Web", urlWeb) },
-                    Modifier.fillMaxWidth().weight(1f)
-                )
-                AbaPrincipal.TV -> TelaTvAoVivo(
-                    listaCanais, canalAtual, epgDados, pesquisaTv, linkDigitadoTv, carregandoTv,
-                    { pesquisaTv = it }, { linkDigitadoTv = it }, { carregarTodasListas() },
-                    { atualizarCanais(emptyList()); canalAtual = null },
-                    { raw ->
-                        carregandoTv = true
-                        scope.launch {
-                            val novos = processarLink(raw.trim()); atualizarCanais(novos + listaCanais)
-                            if (novos.isNotEmpty()) canalAtual = novos.first(); linkDigitadoTv = ""; pesquisaTv = ""; carregandoTv = false
-                        }
-                    },
-                    { canalAtual = it }, { c -> atualizarCanais(listaCanais.map { if (it.id == c.id) it.copy(favorito = !it.favorito) else it }) },
-                    { canalParaMover = it }, { c -> atualizarCanais(listaCanais.filterNot { it.id == c.id }) },
-                    Modifier.fillMaxWidth().weight(1f)
-                )
-                AbaPrincipal.GRADE -> TelaGradeTvMap(
-                    epgDados, listaCanais, pesquisaEpg, linkEpg, carregandoEpg, { pesquisaEpg = it }, { linkEpg = it },
-                    {
-                        carregandoEpg = true; mensagemStatus = "Baixando Grade TV Map..."
-                        scope.launch {
-                            var d = baixarGradeEpg(linkEpg.trim())
-                            if (d.canais.isEmpty()) d = baixarGradeEpg("https://epg.pw/xmltv/epg_BR.xml.gz")
-                            epgDados = d; mensagemStatus = if (d.canais.isNotEmpty()) "Grade: ${d.canais.size} canais!" else "Erro ao carregar grade."
-                            carregandoEpg = false
-                        }
-                    },
-                    { c, nome -> if (c != null) canalAtual = c else mensagemStatus = "'$nome' não está na aba TV Ao Vivo." },
-                    Modifier.fillMaxWidth().weight(1f)
-                )
-                AbaPrincipal.YOUTUBE -> TelaYouTubeFeed(
-                    canaisYouTube, feedYtVideos, pastasYt, canalAtual, modoFeedYt, pastaYtAtual, pesquisaYt, carregandoYt,
-                    { csvPicker.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv", "*/*")) },
-                    { modoFeedYt = it }, { pastaYtAtual = it }, { nomeNovaPasta = ""; abrirDialogNovaPasta = true },
-                    { pesquisaYt = it }, { carregarFeedYt(pastaYtAtual) },
-                    { v -> navegadorExpandido = false; canalAtual = Canal("yt_${v.videoId}", "${v.canalNome} · ${v.titulo}", "https://www.youtube.com/watch?v=${v.videoId}", v.thumbUrl, isWebSite = true, youtubeVideoId = v.videoId) },
-                    { v -> canalYtParaMover = canaisYouTube.firstOrNull { it.channelId == v.canalId } ?: CanalYouTube(v.canalId, v.canalNome, "https://www.youtube.com/channel/${v.canalId}", v.pasta) },
-                    { v -> atualizarCanaisYt(canaisYouTube.map { if (it.channelId == v.canalId) it.copy(favorito = !it.favorito) else it }) },
-                    { v -> canalYtParaDesinscrever = canaisYouTube.firstOrNull { it.channelId == v.canalId } ?: CanalYouTube(v.canalId, v.canalNome, "https://www.youtube.com/channel/${v.canalId}", v.pasta) },
-                    { yt ->
-                        carregandoYt = true
-                        scope.launch {
-                            val vids = buscarVideosCanalYouTube(yt, 15)
-                            if (vids.isNotEmpty()) {
-                                feedYtVideos = vids; modoFeedYt = true; val v = vids.first(); navegadorExpandido = false
-                                canalAtual = Canal("yt_${v.videoId}", "${yt.nome} · ${v.titulo}", "https://www.youtube.com/watch?v=${v.videoId}", v.thumbUrl, isWebSite = true, youtubeVideoId = v.videoId)
+
+                if (mensagemStatus != null) Text(mensagemStatus!!, color = Color(0xFFFFB74D), fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp))
+
+                when (abaPrincipal) {
+                    AbaPrincipal.NAVEGADOR -> Column(Modifier.fillMaxWidth().weight(1f)) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            if (emBuscaFontes) { BotaoAcao("←") { emBuscaFontes = false }; Spacer(Modifier.width(6.dp)) }
+                            CampoTextoCompacto(homeQuery, { homeQuery = it }, "🔍 Pesquisar filme, série, novela ou canal...", Modifier.weight(1f))
+                            Spacer(Modifier.width(6.dp))
+                            Button(enabled = !carregandoBusca && homeQuery.isNotBlank(), modifier = Modifier.height(40.dp), contentPadding = PaddingValues(14.dp, 0.dp), onClick = { pesquisarFontesWeb(homeQuery) }) {
+                                Text(if (carregandoBusca) "..." else "Ir", fontSize = 12.sp)
                             }
-                            carregandoYt = false
                         }
-                    },
-                    { yt -> atualizarCanaisYt(canaisYouTube.map { if (it.channelId == yt.channelId) it.copy(favorito = !it.favorito) else it }) },
-                    { canalYtParaMover = it }, { canalYtParaDesinscrever = it },
-                    Modifier.fillMaxWidth().weight(1f)
-                )
-                AbaPrincipal.FAVORITOS -> TelaFavoritos(
-                    listaCanais, canalAtual, epgDados, { canalAtual = it },
-                    { c -> atualizarCanais(listaCanais.map { if (it.id == c.id) it.copy(favorito = !it.favorito) else it }) },
-                    { canalParaMover = it }, { c -> atualizarCanais(listaCanais.filterNot { it.id == c.id }) },
-                    Modifier.fillMaxWidth().weight(1f)
-                )
+                        if (emBuscaFontes) {
+                            val canaisLocais = remember(listaCanais, homeQuery) {
+                                val q = homeQuery.trim(); if (q.isEmpty()) emptyList() else listaCanais.filter { it.nome.contains(q, true) }
+                            }
+                            TelaFontesWebBusca(
+                                homeQuery, carregandoBusca, canaisLocais, canalAtual, epgDados, linksWebBusca,
+                                { canalAtual = it }, { c -> atualizarCanais(listaCanais.map { if (it.id == c.id) it.copy(favorito = !it.favorito) else it }) },
+                                { canalParaMover = it }, { c -> atualizarCanais(listaCanais.filterNot { it.id == c.id }) },
+                                { web -> abrirSiteNoNavegador(web.titulo, web.url) },
+                                { abrirSiteNoNavegador("Busca: $homeQuery", "https://duckduckgo.com/?q=${URLEncoder.encode("$homeQuery assistir dublado portugues", "UTF-8")}") },
+                                Modifier.fillMaxWidth().weight(1f)
+                            )
+                        } else {
+                            TelaInicioCanais(
+                                listaCanais, canalAtual, epgDados, carregandoTv,
+                                { url, nome -> carregarListaM3u(url, nome) }, { carregarTodasListas() },
+                                { atualizarCanais(emptyList()); canalAtual = null }, { canalAtual = it },
+                                { c -> atualizarCanais(listaCanais.map { if (it.id == c.id) it.copy(favorito = !it.favorito) else it }) },
+                                { canalParaMover = it }, { c -> atualizarCanais(listaCanais.filterNot { it.id == c.id }) },
+                                Modifier.fillMaxWidth().weight(1f)
+                            )
+                        }
+                    }
+                    AbaPrincipal.JELLYFIN -> TelaJellyfin(
+                        jellyfinCfg, { nova -> jellyfinCfg = nova; salvarJellyfinConfig(context, nova) },
+                        { c -> navegadorExpandido = false; canalAtual = c }, { urlWeb -> abrirSiteNoNavegador("Jellyfin Web", urlWeb) },
+                        Modifier.fillMaxWidth().weight(1f)
+                    )
+                    AbaPrincipal.TV -> TelaTvAoVivo(
+                        listaCanais, canalAtual, epgDados, pesquisaTv, linkDigitadoTv, carregandoTv,
+                        pesquisaEpg, linkEpg, carregandoEpg,
+                        { pesquisaTv = it }, { linkDigitadoTv = it }, { carregarTodasListas() },
+                        { atualizarCanais(emptyList()); canalAtual = null },
+                        { raw ->
+                            carregandoTv = true
+                            scope.launch {
+                                val novos = processarLink(raw.trim()); atualizarCanais(novos + listaCanais)
+                                if (novos.isNotEmpty()) canalAtual = novos.first(); linkDigitadoTv = ""; pesquisaTv = ""; carregandoTv = false
+                            }
+                        },
+                        { canalAtual = it }, { c -> atualizarCanais(listaCanais.map { if (it.id == c.id) it.copy(favorito = !it.favorito) else it }) },
+                        { canalParaMover = it }, { c -> atualizarCanais(listaCanais.filterNot { it.id == c.id }) },
+                        { pesquisaEpg = it }, { linkEpg = it },
+                        {
+                            carregandoEpg = true; mensagemStatus = "Baixando Grade TV Map..."
+                            scope.launch {
+                                var d = baixarGradeEpg(linkEpg.trim())
+                                if (d.canais.isEmpty()) d = baixarGradeEpg("https://epg.pw/xmltv/epg_BR.xml.gz")
+                                epgDados = d; mensagemStatus = if (d.canais.isNotEmpty()) "Grade: ${d.canais.size} canais!" else "Erro ao carregar grade."
+                                carregandoEpg = false
+                            }
+                        },
+                        { c, nome -> if (c != null) canalAtual = c else mensagemStatus = "'$nome' não está na lista de canais." },
+                        Modifier.fillMaxWidth().weight(1f)
+                    )
+                    AbaPrincipal.YOUTUBE -> TelaYouTubeFeed(
+                        canaisYouTube, feedYtVideos, pastasYt, canalAtual, modoFeedYt, pastaYtAtual, pesquisaYt, carregandoYt,
+                        { csvPicker.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv", "*/*")) },
+                        { modoFeedYt = it }, { pastaYtAtual = it }, { nomeNovaPasta = ""; abrirDialogNovaPasta = true },
+                        { pesquisaYt = it }, { carregarFeedYt(pastaYtAtual) },
+                        { v -> navegadorExpandido = false; canalAtual = Canal("yt_${v.videoId}", "${v.canalNome} · ${v.titulo}", "https://www.youtube.com/watch?v=${v.videoId}", v.thumbUrl, isWebSite = true, youtubeVideoId = v.videoId) },
+                        { v -> canalYtParaMover = canaisYouTube.firstOrNull { it.channelId == v.canalId } ?: CanalYouTube(v.canalId, v.canalNome, "https://www.youtube.com/channel/${v.canalId}", v.pasta) },
+                        { v -> atualizarCanaisYt(canaisYouTube.map { if (it.channelId == v.canalId) it.copy(favorito = !it.favorito) else it }) },
+                        { v -> canalYtParaDesinscrever = canaisYouTube.firstOrNull { it.channelId == v.canalId } ?: CanalYouTube(v.canalId, v.canalNome, "https://www.youtube.com/channel/${v.canalId}", v.pasta) },
+                        { yt ->
+                            carregandoYt = true
+                            scope.launch {
+                                val vids = buscarVideosCanalYouTube(yt, 15)
+                                if (vids.isNotEmpty()) {
+                                    feedYtVideos = vids; modoFeedYt = true; val v = vids.first(); navegadorExpandido = false
+                                    canalAtual = Canal("yt_${v.videoId}", "${yt.nome} · ${v.titulo}", "https://www.youtube.com/watch?v=${v.videoId}", v.thumbUrl, isWebSite = true, youtubeVideoId = v.videoId)
+                                }
+                                carregandoYt = false
+                            }
+                        },
+                        { yt -> atualizarCanaisYt(canaisYouTube.map { if (it.channelId == yt.channelId) it.copy(favorito = !it.favorito) else it }) },
+                        { canalYtParaMover = it }, { canalYtParaDesinscrever = it },
+                        Modifier.fillMaxWidth().weight(1f)
+                    )
+                    AbaPrincipal.FAVORITOS -> TelaFavoritos(
+                        listaCanais, canalAtual, epgDados, { canalAtual = it },
+                        { c -> atualizarCanais(listaCanais.map { if (it.id == c.id) it.copy(favorito = !it.favorito) else it }) },
+                        { canalParaMover = it }, { c -> atualizarCanais(listaCanais.filterNot { it.id == c.id }) },
+                        Modifier.fillMaxWidth().weight(1f)
+                    )
+                }
             }
         }
     }
