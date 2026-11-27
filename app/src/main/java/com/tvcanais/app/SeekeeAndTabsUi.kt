@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -93,20 +94,34 @@ fun CardCanalLista(
 @Composable
 fun TelaInicioCanais(
     listaCanais: List<Canal>, canalAtual: Canal?, epgDados: EpgDados, carregando: Boolean,
-    onCarregarBrasil: () -> Unit, onCarregarPluto: () -> Unit, onLimpar: () -> Unit,
+    onCarregarLista: (url: String, nome: String) -> Unit, onCarregarTodas: () -> Unit, onLimpar: () -> Unit,
     onTocar: (Canal) -> Unit, onFavoritar: (Canal) -> Unit, onMover: (Canal) -> Unit, onRemover: (Canal) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val botoesListas = listOf(
+        "🇧🇷 Brasil (iptv-com)" to "https://github.com/iptv-com/iptv/raw/refs/heads/main/lists/brazil.m3u",
+        "📡 Abertos" to "https://github.com/iptv-com/iptv/raw/main/lists/abertos.m3u",
+        "🎬 TV Legal (Helen)" to "https://raw.githubusercontent.com/helenfernanda/gratis/main/iptvlegal.m3u",
+        "🌐 MeuTédio" to "https://tv.meuted.io/iptvlegal.m3u",
+        "📺 Canais BR" to "https://iptv-org.github.io/iptv/countries/br.m3u",
+        "🟣 Pluto TV BR" to "https://raw.githubusercontent.com/iptv-org/iptv/master/streams/br_pluto.m3u"
+    )
     Column(modifier = modifier.padding(horizontal = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            OutlinedButton(enabled = !carregando, modifier = Modifier.weight(1f).height(38.dp), contentPadding = PaddingValues(8.dp, 0.dp), onClick = onCarregarBrasil) {
-                Text(if (carregando) "..." else "📺 Canais BR", fontSize = 12.sp)
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            item {
+                Button(enabled = !carregando, modifier = Modifier.height(36.dp), contentPadding = PaddingValues(12.dp, 0.dp), onClick = onCarregarTodas) {
+                    Text(if (carregando) "Carregando..." else "⚡ Todas Listas", fontSize = 12.sp)
+                }
             }
-            OutlinedButton(enabled = !carregando, modifier = Modifier.weight(1f).height(38.dp), contentPadding = PaddingValues(8.dp, 0.dp), onClick = onCarregarPluto) {
-                Text(if (carregando) "..." else "🟣 Pluto TV BR", fontSize = 12.sp)
+            items(botoesListas) { (nome, url) ->
+                OutlinedButton(enabled = !carregando, modifier = Modifier.height(36.dp), contentPadding = PaddingValues(10.dp, 0.dp), onClick = { onCarregarLista(url, nome) }) {
+                    Text(nome, fontSize = 12.sp)
+                }
             }
-            OutlinedButton(modifier = Modifier.height(38.dp), contentPadding = PaddingValues(12.dp, 0.dp), onClick = onLimpar) {
-                Text("Limpar", fontSize = 12.sp)
+            item {
+                OutlinedButton(modifier = Modifier.height(36.dp), contentPadding = PaddingValues(12.dp, 0.dp), onClick = onLimpar) {
+                    Text("🗑️ Limpar", fontSize = 12.sp)
+                }
             }
         }
         val agoraMs = System.currentTimeMillis()
