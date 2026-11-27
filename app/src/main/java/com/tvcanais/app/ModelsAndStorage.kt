@@ -13,7 +13,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.xmlpull.v1.XmlPullParser
 import java.net.URL
-import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.UUID
@@ -22,7 +21,6 @@ enum class AbaPrincipal(val titulo: String, val icone: String) {
     NAVEGADOR("Início", "🏠"),
     JELLYFIN("Jellyfin", "🟣"),
     TV("TV Ao Vivo", "📺"),
-    GRADE("Grade TV", "📅"),
     YOUTUBE("YouTube", "▶️"),
     FAVORITOS("Favoritos", "⭐")
 }
@@ -83,8 +81,7 @@ fun limparHtml(texto: String): String =
     if (texto.isBlank()) "" else Html.fromHtml(texto, Html.FROM_HTML_MODE_COMPACT).toString().trim()
 
 fun salvarPastasYt(context: Context, pastas: List<String>) {
-    val arr = JSONArray()
-    pastas.forEach { arr.put(it) }
+    val arr = JSONArray(); pastas.forEach { arr.put(it) }
     context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE).edit().putString("yt_pastas", arr.toString()).apply()
 }
 
