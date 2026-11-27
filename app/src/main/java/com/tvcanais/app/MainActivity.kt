@@ -23,6 +23,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -48,12 +49,25 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URL
+import java.util.UUID
+
+enum class AbaCategoria(val titulo: String, val icone: String) {
+    INICIO("Início", "🔍"),
+    FAVORITOS("Favoritos", "⭐"),
+    TV("Canais", "📺"),
+    FILMES("Filmes", "🎬"),
+    SERIES("Séries", "🎞️"),
+    ANIMES("Animes", "⛩️")
+}
 
 data class Canal(
+    val id: String = UUID.randomUUID().toString(),
     val nome: String,
     val url: String,
     val isWebSite: Boolean = false,
-    val webOriginalUrl: String? = null
+    val webOriginalUrl: String? = null,
+    val categoria: AbaCategoria = AbaCategoria.TV,
+    val favorito: Boolean = false
 )
 
 class MainActivity : ComponentActivity() {
@@ -122,7 +136,15 @@ fun TelaPrincipalTV(activity: MainActivity, isInPip: Boolean) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    var abaAtual by remember { mutableStateOf(AbaCategoria.INICIO) }
+    var textoPesquisa by remember { mutableStateOf("") }
+
+    var abrirDialogAdicionar by remember { mutableStateOf(false) }
     var linkDigitado by remember { mutableStateOf("") }
+    var categoriaNovoLink by remember { mutableStateOf(AbaCategoria.TV) }
+
+    var canalParaMover by remember { mutableStateOf<Canal?>(null) }
+
     var carregando by remember { mutableStateOf(false) }
     var telaCheia by remember { mutableStateOf(false) }
     var mostrarSiteCompleto by remember { mutableStateOf(false) }
@@ -132,9 +154,9 @@ fun TelaPrincipalTV(activity: MainActivity, isInPip: Boolean) {
         mutableStateOf(
             carregarCanaisSalvos(context).ifEmpty {
                 listOf(
-                    Canal("Globoplay (Login / Ao Vivo)", "https://globoplay.globo.com/agora-na-tv/", isWebSite = true),
-                    Canal("SBT Ao Vivo", "https://www.sbt.com.br/ao-vivo", isWebSite = true),
-                    Canal("Band Ao Vivo", "https://www.band.uol.com.br/ao-vivo", isWebSite = true)
+                    Canal(nome = "Globoplay (Ao Vivo)", url = "https://globoplay.globo.com/agora-na-tv/", isWebSite = true, categoria = AbaCategoria.TV),
+                    Canal(nome = "SBT Ao Vivo (Site)", url = "https://www.sbt.com.br/ao-vivo", isWebSite = true, categoria = AbaCategoria.TV),
+                    Canal(nome = "Band Ao Vivo (Site)", url = "https://www.band.uol.com.br/ao-vivo", isWebSite = true, categoria = AbaCategoria.TV)
                 )
             }
         )
@@ -142,7 +164,11 @@ fun TelaPrincipalTV(activity: MainActivity, isInPip: Boolean) {
 
     var canalAtual by remember { mutableStateOf<Canal?>(null) }
 
-    // Sai da tela cheia ao apertar o botão Voltar do celular
+    fun atualizarCanais(novaLista: List<Canal>) {
+        listaCanais = novaLista
+        salvarCanais(context, novaLista)
+    }
+
     BackHandler(enabled = telaCheia) {
         telaCheia = false
         activity.alterarTelaCheia(false)
@@ -153,7 +179,6 @@ fun TelaPrincipalTV(activity: MainActivity, isInPip: Boolean) {
             addListener(object : Player.Listener {
                 override fun onPlayerError(error: PlaybackException) {
                     val atual = canalAtual
-                    // Se o link capturado falhar no player nativo, volta para o player Web isolado
                     if (atual != null && atual.webOriginalUrl != null) {
                         canalAtual = atual.copy(
                             url = atual.webOriginalUrl,
@@ -161,7 +186,7 @@ fun TelaPrincipalTV(activity: MainActivity, isInPip: Boolean) {
                             webOriginalUrl = null
                         )
                     } else {
-                        mensagemStatus = "Erro ao abrir stream. Verifique se o canal está online."
+                        mensagemStatus = "Canal offline ou formato incompatível."
                     }
                 }
             })
@@ -185,14 +210,33 @@ fun TelaPrincipalTV(activity: MainActivity, isInPip: Boolean) {
         }
     }
 
+    // Filtra a lista de acordo com a aba selecionada e o texto de pesquisa
+    val canaisFiltrados = remember(listaCanais, abaAtual, textoPesquisa) {
+        val porAba = when (abaAtual) {
+            AbaCategoria.INICIO -> listaCanais
+            AbaCategoria.FAVORITOS -> listaCanais.filter { it.favorito }
+            else -> listaCanais.filter { it.categoria == abaAtual }
+        }
+        val busca = textoPesquisa.trim()
+        if (busca.isEmpty()) porAba
+        else porAba.filter { it.nome.contains(busca, ignoreCase = true) }
+    }
+
     val playerExpandido = isInPip || telaCheia
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF0E0E12))
+            // Respeita a barra de relógio no topo e os 3 botões do Android embaixo!
+            .then(
+                if (playerExpandido) Modifier
+                else Modifier
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+            )
     ) {
-        // 1. BLOCO FIXO DO PICTURE PLAYER NO TOPO
+        // 1. BLOCO FIXO DO PLAYER NO TOPO
         Box(
             modifier = if (playerExpandido) {
                 Modifier
@@ -217,9 +261,9 @@ fun TelaPrincipalTV(activity: MainActivity, isInPip: Boolean) {
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Cole um link ou toque em 'Canais Brasil' abaixo",
+                        text = "Pesquise, adicione um link ou toque em Canais Brasil",
                         color = Color.Gray,
-                        fontSize = 13.sp
+                        fontSize = 12.sp
                     )
                 }
             } else if (atual.isWebSite) {
@@ -242,7 +286,6 @@ fun TelaPrincipalTV(activity: MainActivity, isInPip: Boolean) {
                             }
 
                             webViewClient = object : WebViewClient() {
-                                // Tenta capturar automaticamente vídeo .m3u8/.mpd dentro da página
                                 override fun shouldInterceptRequest(
                                     view: WebView?,
                                     request: WebResourceRequest?
@@ -269,7 +312,6 @@ fun TelaPrincipalTV(activity: MainActivity, isInPip: Boolean) {
                                 override fun onPageFinished(view: WebView?, url: String?) {
                                     super.onPageFinished(view, url)
                                     if (!mostrarSiteCompleto) {
-                                        // Isola apenas o vídeo da página para não parecer um site reduzido
                                         view?.evaluateJavascript(
                                             """
                                             (function() {
@@ -318,36 +360,174 @@ fun TelaPrincipalTV(activity: MainActivity, isInPip: Boolean) {
                 )
             }
 
-            // Botões flutuantes discretos no canto superior direito do player (ocultos no PiP)
-            if (atual != null && !isInPip) {
-                Row(
+            // Botão discreto de sair apenas quando está em Tela Cheia
+            if (telaCheia && !isInPip) {
+                Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        .padding(16.dp)
                 ) {
-                    if (atual.isWebSite) {
-                        BotaoOverlayPlayer(
-                            texto = if (mostrarSiteCompleto) "Focar Vídeo" else "Site / Login"
-                        ) {
-                            mostrarSiteCompleto = !mostrarSiteCompleto
-                            canalAtual = atual.copy()
-                        }
-                    }
-                    BotaoOverlayPlayer(texto = "PiP") {
-                        activity.entrarModoPip()
-                    }
-                    BotaoOverlayPlayer(texto = if (telaCheia) "Sair" else "Tela Cheia") {
-                        val novoEstado = !telaCheia
-                        telaCheia = novoEstado
-                        activity.alterarTelaCheia(novoEstado)
+                    BotaoAcaoPlayer(texto = "✕ Sair da Tela Cheia") {
+                        telaCheia = false
+                        activity.alterarTelaCheia(false)
                     }
                 }
             }
         }
 
-        // Tudo abaixo do player desaparece automaticamente quando entra em PiP ou Tela Cheia!
         if (!playerExpandido) {
+            // 2. BARRA DEDICADA DO PLAYER (PiP, Tela Cheia e Canal Atual - nunca tampada pela barra de status!)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF16161E))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = canalAtual?.nome ?: "Nenhum canal tocando",
+                    color = if (canalAtual != null) Color(0xFF66BB6A) else Color.Gray,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                if (canalAtual != null) {
+                    if (canalAtual!!.isWebSite) {
+                        BotaoAcaoPlayer(
+                            texto = if (mostrarSiteCompleto) "Vídeo" else "Site"
+                        ) {
+                            mostrarSiteCompleto = !mostrarSiteCompleto
+                            canalAtual = canalAtual!!.copy()
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                    }
+                    BotaoAcaoPlayer(texto = "PiP") {
+                        activity.entrarModoPip()
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    BotaoAcaoPlayer(texto = "Tela Cheia") {
+                        telaCheia = true
+                        activity.alterarTelaCheia(true)
+                    }
+                }
+            }
+
+            // 3. ABAS DE CATEGORIAS (Início, Favoritos, Canais, Filmes, Séries, Animes)
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF121218))
+                    .padding(vertical = 8.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(AbaCategoria.entries) { aba ->
+                    val selecionada = aba == abaAtual
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(if (selecionada) Color(0xFF2E7D32) else Color(0xFF22222C))
+                            .clickable { abaAtual = aba }
+                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                    ) {
+                        Text(
+                            text = "${aba.icone} ${aba.titulo}",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = if (selecionada) FontWeight.Bold else FontWeight.Normal
+                        )
+                    }
+                }
+            }
+
+            // 4. BARRA DE PESQUISA + BOTÃO ADICIONAR LINK
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = textoPesquisa,
+                    onValueChange = { textoPesquisa = it },
+                    placeholder = {
+                        Text(
+                            text = "Pesquisar em ${abaAtual.titulo}...",
+                            fontSize = 13.sp
+                        )
+                    },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                    onClick = {
+                        categoriaNovoLink = if (abaAtual == AbaCategoria.INICIO || abaAtual == AbaCategoria.FAVORITOS) {
+                            AbaCategoria.TV
+                        } else {
+                            abaAtual
+                        }
+                        abrirDialogAdicionar = true
+                    }
+                ) {
+                    Text("+ Link")
+                }
+            }
+
+            // Botões rápidos na página inicial (Início)
+            if (abaAtual == AbaCategoria.INICIO) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        enabled = !carregando,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            carregando = true
+                            mensagemStatus = "Baixando canais abertos do Brasil..."
+                            scope.launch {
+                                val canaisBr = processarLink(
+                                    url = "https://iptv-org.github.io/iptv/countries/br.m3u",
+                                    categoriaPadrao = AbaCategoria.TV,
+                                    autoCategorizar = true
+                                )
+                                if (canaisBr.size > 1) {
+                                    atualizarCanais(canaisBr + listaCanais)
+                                    canalAtual = canaisBr.first()
+                                    mensagemStatus = "${canaisBr.size} canais adicionados!"
+                                } else {
+                                    mensagemStatus = "Erro ao baixar lista agora."
+                                }
+                                carregando = false
+                            }
+                        }
+                    ) {
+                        Text(
+                            text = if (carregando) "Carregando..." else "📺 Canais Brasil (Grátis)",
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            atualizarCanais(emptyList())
+                            canalAtual = null
+                            mensagemStatus = "Lista limpa."
+                        }
+                    ) {
+                        Text("Limpar", fontSize = 12.sp)
+                    }
+                }
+            }
+
             if (mensagemStatus != null) {
                 Text(
                     text = mensagemStatus!!,
@@ -357,170 +537,258 @@ fun TelaPrincipalTV(activity: MainActivity, isInPip: Boolean) {
                 )
             }
 
-            // 2. BARRA DE ADICIONAR LINK
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedTextField(
-                    value = linkDigitado,
-                    onValueChange = { linkDigitado = it },
-                    placeholder = { Text("Cole link .m3u, .m3u8 ou site", fontSize = 13.sp) },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
+            HorizontalDivider(color = Color(0xFF262630))
+
+            // 5. LISTA ROLÁVEL (LIMITADA ACIMA DOS 3 BOTÕES DO ANDROID)
+            if (canaisFiltrados.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (textoPesquisa.isNotBlank()) {
+                            "Nenhum resultado para \"$textoPesquisa\""
+                        } else {
+                            "Nenhum item em ${abaAtual.titulo}.\nToque em '+ Link' para adicionar."
+                        },
+                        color = Color.Gray,
+                        fontSize = 13.sp
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentPadding = PaddingValues(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(canaisFiltrados, key = { it.id }) { canal ->
+                        val estaTocando = canalAtual?.id == canal.id
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (estaTocando) Color(0xFF1F2A38) else Color(0xFF191920))
+                                .clickable { canalAtual = canal }
+                                .padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 62.dp, height = 40.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (estaTocando) Color(0xFF2E7D32) else Color(0xFF2A2A35)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = if (estaTocando) "▶ VIVO" else "▶ PLAY",
+                                    color = Color.White,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(10.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = canal.nome,
+                                    color = if (estaTocando) Color(0xFF66BB6A) else Color.White,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "${canal.categoria.icone} ${canal.categoria.titulo}",
+                                    color = Color.Gray,
+                                    fontSize = 11.sp
+                                )
+                            }
+
+                            // Botão Favorito (Estrela)
+                            Text(
+                                text = if (canal.favorito) "⭐" else "☆",
+                                color = if (canal.favorito) Color(0xFFFFD54F) else Color.Gray,
+                                fontSize = 18.sp,
+                                modifier = Modifier
+                                    .clickable {
+                                        val nova = listaCanais.map {
+                                            if (it.id == canal.id) it.copy(favorito = !it.favorito) else it
+                                        }
+                                        atualizarCanais(nova)
+                                    }
+                                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                            )
+
+                            // Botão Mover para outra aba
+                            Text(
+                                text = "⇄",
+                                color = Color(0xFF64B5F6),
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clickable { canalParaMover = canal }
+                                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                            )
+
+                            // Botão Remover
+                            Text(
+                                text = "✕",
+                                color = Color.Gray,
+                                fontSize = 15.sp,
+                                modifier = Modifier
+                                    .clickable {
+                                        atualizarCanais(listaCanais.filterNot { it.id == canal.id })
+                                    }
+                                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // POPUP: ADICIONAR NOVO LINK E ESCOLHER ABA
+    if (abrirDialogAdicionar) {
+        AlertDialog(
+            onDismissRequest = { abrirDialogAdicionar = false },
+            title = { Text("Adicionar Link ou Lista") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = linkDigitado,
+                        onValueChange = { linkDigitado = it },
+                        placeholder = { Text("Cole link .m3u, .m3u8 ou site") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("Salvar em qual aba?", fontSize = 13.sp, color = Color.LightGray)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    val destinos = listOf(AbaCategoria.TV, AbaCategoria.FILMES, AbaCategoria.SERIES, AbaCategoria.ANIMES)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(destinos) { dest ->
+                            val selecionado = dest == categoriaNovoLink
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(if (selecionado) Color(0xFF2E7D32) else Color(0xFF2C2C38))
+                                    .clickable { categoriaNovoLink = dest }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = "${dest.icone} ${dest.titulo}",
+                                    color = Color.White,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
                 Button(
                     enabled = !carregando && linkDigitado.isNotBlank(),
                     onClick = {
                         val urlLimpa = linkDigitado.trim()
+                        val destino = categoriaNovoLink
+                        abrirDialogAdicionar = false
                         carregando = true
-                        mensagemStatus = null
                         scope.launch {
-                            val novosCanais = processarLink(urlLimpa)
-                            val atualizada = novosCanais + listaCanais
-                            listaCanais = atualizada
-                            salvarCanais(context, atualizada)
-                            if (novosCanais.isNotEmpty()) {
-                                canalAtual = novosCanais.first()
+                            val novos = processarLink(
+                                url = urlLimpa,
+                                categoriaPadrao = destino,
+                                autoCategorizar = false
+                            )
+                            atualizarCanais(novos + listaCanais)
+                            if (novos.isNotEmpty()) {
+                                canalAtual = novos.first()
                             }
                             linkDigitado = ""
                             carregando = false
                         }
                     }
                 ) {
-                    Text(if (carregando) "..." else "Add")
+                    Text("Adicionar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { abrirDialogAdicionar = false }) {
+                    Text("Cancelar")
                 }
             }
+        )
+    }
 
-            // 3. BOTÃO RÁPIDO PARA CARREGAR CANAIS GRATUITOS DO BRASIL (PLAYER NATIVO PURO)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    enabled = !carregando,
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        carregando = true
-                        mensagemStatus = "Baixando lista de canais abertos do Brasil..."
-                        scope.launch {
-                            val canaisBr = processarLink("https://iptv-org.github.io/iptv/countries/br.m3u")
-                            if (canaisBr.size > 1) {
-                                val atualizada = canaisBr + listaCanais
-                                listaCanais = atualizada
-                                salvarCanais(context, atualizada)
-                                canalAtual = canaisBr.first()
-                                mensagemStatus = "${canaisBr.size} canais carregados!"
-                            } else {
-                                mensagemStatus = "Não foi possível carregar a lista agora."
-                            }
-                            carregando = false
-                        }
-                    }
-                ) {
-                    Text("📺 Canais Brasil (Grátis)", fontSize = 12.sp)
-                }
-
-                OutlinedButton(
-                    onClick = {
-                        listaCanais = emptyList()
-                        canalAtual = null
-                        salvarCanais(context, emptyList())
-                    }
-                ) {
-                    Text("Limpar", fontSize = 12.sp)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
-            HorizontalDivider(color = Color(0xFF262630))
-
-            // 4. LISTA ROLÁVEL ABAIXO DO PLAYER (SÓ A LISTA ROLA)
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentPadding = PaddingValues(10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(listaCanais) { canal ->
-                    val estaTocando = canalAtual?.url == canal.url ||
-                            (canalAtual?.webOriginalUrl != null && canalAtual?.webOriginalUrl == canal.url)
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (estaTocando) Color(0xFF1F2A38) else Color(0xFF191920))
-                            .clickable { canalAtual = canal }
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Miniatura estilo bloco de player
-                        Box(
+    // POPUP: MOVER CANAL PARA OUTRA ABA
+    val movendo = canalParaMover
+    if (movendo != null) {
+        val destinos = listOf(AbaCategoria.TV, AbaCategoria.FILMES, AbaCategoria.SERIES, AbaCategoria.ANIMES)
+        AlertDialog(
+            onDismissRequest = { canalParaMover = null },
+            title = { Text("Mover canal para:") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = movendo.nome,
+                        color = Color(0xFF66BB6A),
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    destinos.forEach { destino ->
+                        Row(
                             modifier = Modifier
-                                .size(width = 68.dp, height = 42.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (estaTocando) Color(0xFF2E7D32) else Color(0xFF2A2A35)),
-                            contentAlignment = Alignment.Center
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (movendo.categoria == destino) Color(0xFF2E7D32)
+                                    else Color(0xFF262632)
+                                )
+                                .clickable {
+                                    val novaLista = listaCanais.map {
+                                        if (it.id == movendo.id) it.copy(categoria = destino) else it
+                                    }
+                                    atualizarCanais(novaLista)
+                                    canalParaMover = null
+                                }
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = if (estaTocando) "▶ AO VIVO" else "▶ PLAY",
+                                text = "${destino.icone}  ${destino.titulo}",
                                 color = Color.White,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
                             )
                         }
-
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = canal.nome,
-                                color = if (estaTocando) Color(0xFF66BB6A) else Color.White,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = if (canal.isWebSite) "Player Web Isolado" else "Player Nativo (HD)",
-                                color = Color.Gray,
-                                fontSize = 11.sp
-                            )
-                        }
-
-                        Text(
-                            text = "✕",
-                            color = Color.Gray,
-                            fontSize = 16.sp,
-                            modifier = Modifier
-                                .clickable {
-                                    val novaLista = listaCanais.filterNot { it == canal }
-                                    listaCanais = novaLista
-                                    salvarCanais(context, novaLista)
-                                }
-                                .padding(8.dp)
-                        )
                     }
                 }
+            },
+            confirmButton = {
+                TextButton(onClick = { canalParaMover = null }) {
+                    Text("Fechar")
+                }
             }
-        }
+        )
     }
 }
 
 @Composable
-fun BotaoOverlayPlayer(texto: String, onClick: () -> Unit) {
+fun BotaoAcaoPlayer(texto: String, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(6.dp))
-            .background(Color(0xAA000000))
+            .background(Color(0xFF2B2B38))
             .clickable { onClick() }
-            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .padding(horizontal = 10.dp, vertical = 5.dp)
     ) {
         Text(text = texto, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
     }
@@ -530,9 +798,12 @@ fun salvarCanais(context: Context, canais: List<Canal>) {
     val arr = JSONArray()
     canais.forEach { c ->
         val obj = JSONObject()
+        obj.put("id", c.id)
         obj.put("nome", c.nome)
         obj.put("url", c.url)
         obj.put("isWebSite", c.isWebSite)
+        obj.put("categoria", c.categoria.name)
+        obj.put("favorito", c.favorito)
         arr.put(obj)
     }
     context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE)
@@ -549,11 +820,16 @@ fun carregarCanaisSalvos(context: Context): List<Canal> {
         val arr = JSONArray(json)
         for (i in 0 until arr.length()) {
             val obj = arr.getJSONObject(i)
+            val catNome = obj.optString("categoria", AbaCategoria.TV.name)
+            val cat = AbaCategoria.entries.find { it.name == catNome } ?: AbaCategoria.TV
             list.add(
                 Canal(
+                    id = obj.optString("id", UUID.randomUUID().toString()),
                     nome = obj.optString("nome", "Canal"),
                     url = obj.optString("url", ""),
-                    isWebSite = obj.optBoolean("isWebSite", false)
+                    isWebSite = obj.optBoolean("isWebSite", false),
+                    categoria = cat,
+                    favorito = obj.optBoolean("favorito", false)
                 )
             )
         }
@@ -563,7 +839,11 @@ fun carregarCanaisSalvos(context: Context): List<Canal> {
     }
 }
 
-suspend fun processarLink(url: String): List<Canal> = withContext(Dispatchers.IO) {
+suspend fun processarLink(
+    url: String,
+    categoriaPadrao: AbaCategoria,
+    autoCategorizar: Boolean
+): List<Canal> = withContext(Dispatchers.IO) {
     try {
         val conexao = URL(url).openConnection().apply {
             connectTimeout = 8000
@@ -580,12 +860,32 @@ suspend fun processarLink(url: String): List<Canal> = withContext(Dispatchers.IO
         if (ehListaDeCanais) {
             val canaisEncontrados = mutableListOf<Canal>()
             var nomeTemporario = "Canal"
+            var catTemporaria = categoriaPadrao
+
             for (linha in conteudo.lines()) {
                 val l = linha.trim()
                 if (l.startsWith("#EXTINF")) {
                     nomeTemporario = l.substringAfterLast(",", "Canal").trim()
+                    if (autoCategorizar) {
+                        val lower = l.lowercase()
+                        catTemporaria = when {
+                            lower.contains("anime") -> AbaCategoria.ANIMES
+                            lower.contains("serie") || lower.contains("série") -> AbaCategoria.SERIES
+                            lower.contains("movie") || lower.contains("filme") || lower.contains("cine") -> AbaCategoria.FILMES
+                            else -> categoriaPadrao
+                        }
+                    } else {
+                        catTemporaria = categoriaPadrao
+                    }
                 } else if (l.startsWith("http")) {
-                    canaisEncontrados.add(Canal(nome = nomeTemporario, url = l, isWebSite = false))
+                    canaisEncontrados.add(
+                        Canal(
+                            nome = nomeTemporario,
+                            url = l,
+                            isWebSite = false,
+                            categoria = catTemporaria
+                        )
+                    )
                 }
             }
             if (canaisEncontrados.isNotEmpty()) return@withContext canaisEncontrados
@@ -600,7 +900,8 @@ suspend fun processarLink(url: String): List<Canal> = withContext(Dispatchers.IO
             Canal(
                 nome = url.removePrefix("https://").removePrefix("http://").take(35),
                 url = url,
-                isWebSite = !ehStream
+                isWebSite = !ehStream,
+                categoria = categoriaPadrao
             )
         )
     } catch (e: Exception) {
@@ -611,7 +912,8 @@ suspend fun processarLink(url: String): List<Canal> = withContext(Dispatchers.IO
             Canal(
                 nome = url.removePrefix("https://").removePrefix("http://").take(35),
                 url = url,
-                isWebSite = !ehVideo
+                isWebSite = !ehVideo,
+                categoria = categoriaPadrao
             )
         )
     }
