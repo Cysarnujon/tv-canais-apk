@@ -127,17 +127,17 @@ suspend fun buscarVideoParaEpisodioSeekee(item: MidiaItem, temp: Int, ep: Int, l
         return@withContext Canal("${item.id}_arch", "${item.titulo} (Grátis HD)", mp4Archive, item.posterUrl, isWebSite = false)
     }
 
-    val buscaYt = if (item.tipo == "Filmes") "${item.titulo} filme completo dublado" else "${item.titulo} temporada $temp episodio $ep"
-    val vid = buscarPrimeiroVideoYoutube(buscaYt) ?: buscarPrimeiroVideoYoutube("${item.titulo} trailer dublado")
-    if (vid != null) {
-        val label = if (item.tipo == "Filmes") item.titulo else "${item.titulo} · T$temp E$ep"
-        return@withContext Canal("${item.id}_${temp}_$ep", label,
-            "https://www.youtube.com/embed/$vid?autoplay=1&playsinline=1&rel=0",
-            item.posterUrl, isWebSite = true, youtubeVideoId = vid)
+    val queryWeb = if (item.tipo == "Filmes") "${item.titulo} assistir dublado portugues" else "${item.titulo} temporada $temp episodio $ep assistir dublado"
+    val links = buscarWebDuckDuckGo(queryWeb)
+    val primeiroSite = links.firstOrNull()
+    val label = if (item.tipo == "Filmes") item.titulo else "${item.titulo} · T$temp E$ep"
+
+    if (primeiroSite != null) {
+        return@withContext Canal("${item.id}_${temp}_$ep", "$label (${primeiroSite.dominio})", primeiroSite.url, item.posterUrl, isWebSite = true)
     }
 
-    val enc = URLEncoder.encode("${item.titulo} temporada $temp episodio $ep assistir online", "UTF-8")
-    Canal("${item.id}_${temp}_$ep", "${item.titulo} · T$temp E$ep", "https://duckduckgo.com/?q=$enc", item.posterUrl, isWebSite = true)
+    val enc = URLEncoder.encode(queryWeb, "UTF-8")
+    Canal("${item.id}_${temp}_$ep", label, "https://duckduckgo.com/?q=$enc", item.posterUrl, isWebSite = true)
 }
 
 suspend fun buscarMp4ArchiveOrg(titulo: String): String? = withContext(Dispatchers.IO) {
@@ -156,13 +156,6 @@ suspend fun buscarMp4ArchiveOrg(titulo: String): String? = withContext(Dispatche
             }
         }
         null
-    } catch (e: Exception) { null }
-}
-
-suspend fun buscarPrimeiroVideoYoutube(query: String): String? = withContext(Dispatchers.IO) {
-    try {
-        val html = lerTextoUrl("https://www.youtube.com/results?search_query=${URLEncoder.encode(query, "UTF-8")}")
-        Regex(""""videoId":"([a-zA-Z0-9_-]{11})"""").find(html)?.groupValues?.getOrNull(1)
     } catch (e: Exception) { null }
 }
 
@@ -189,7 +182,7 @@ suspend fun buscarSeekeeCompleto(query: String): BuscaSeekeeResultado = coroutin
     val tvTask = async(Dispatchers.IO) { buscarSeriesTvMazePorNome(qEnc) }
     val animeTask = async(Dispatchers.IO) { buscarAnimesJikanPorNome(qEnc) }
     val filmesTask = async(Dispatchers.IO) { buscarFilmesItunes(query.trim()).take(6) }
-    val webTask = async(Dispatchers.IO) { buscarWebDuckDuckGo("$query assistir online") }
+    val webTask = async(Dispatchers.IO) { buscarWebDuckDuckGo("$query assistir dublado portugues") }
     BuscaSeekeeResultado((tvTask.await() + animeTask.await() + filmesTask.await()).distinctBy { it.titulo.lowercase() }, webTask.await())
 }
 
@@ -283,7 +276,7 @@ fun parsearListaJikan(jsonStr: String): List<MidiaItem> {
         o.optJSONArray("genres")?.let { g -> for (k in 0 until g.length()) generos.add(traduzirGenero(g.getJSONObject(k).optTexto("name"))) }
         lista.add(MidiaItem("jikan_${o.optInt("mal_id", i)}", titulo, "Anime", ano, "Japão", generos.distinct(),
             o.optTexto("synopsis"), poster, nota, (o.optInt("members", 45000) / 10).coerceAtLeast(10000),
-            trailerUrl = o.optJSONObject("trailer")?.optTexto("embed_url")?.ifBlank { null }, webUrl = o.optTexto("url").ifBlank { null }))
+            trailerUrl = null, webUrl = o.optTexto("url").ifBlank { null }))
     }
     return lista
 }
@@ -314,6 +307,7 @@ suspend fun buscarWebDuckDuckGo(query: String): List<ResultadoWeb> = withContext
             if (res.size >= 10) break
             val urlLimpa = extrairUrlDuckDuckGo(links[i].groupValues[1])
             if (!urlLimpa.startsWith("http")) continue
+            if (urlLimpa.contains("youtube.com", true) || urlLimpa.contains("youtu.be", true)) continue
             res.add(ResultadoWeb(limparHtml(links[i].groupValues[2]), urlLimpa, Uri.parse(urlLimpa).host?.removePrefix("www.") ?: urlLimpa,
                 if (i < snippets.size) limparHtml(snippets[i].groupValues[1]) else ""))
         }
