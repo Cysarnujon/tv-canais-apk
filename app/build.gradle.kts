@@ -46,6 +46,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
 
     implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:13.0.0")
 
     val media3Version = "1.11.1"
     implementation("androidx.media3:media3-exoplayer:$media3Version")
