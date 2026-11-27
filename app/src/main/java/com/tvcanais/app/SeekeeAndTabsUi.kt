@@ -4,8 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.*
@@ -91,41 +91,29 @@ fun CardCanalLista(
 }
 
 @Composable
-fun TelaInicioPlataformas(
-    onAbrirPlataforma: (PlataformaGratuita) -> Unit,
-    onAbrirCanaisBrasil: () -> Unit,
+fun TelaInicioCanais(
+    listaCanais: List<Canal>, canalAtual: Canal?, epgDados: EpgDados, carregando: Boolean,
+    onCarregarBrasil: () -> Unit, onCarregarPluto: () -> Unit, onLimpar: () -> Unit,
+    onTocar: (Canal) -> Unit, onFavoritar: (Canal) -> Unit, onMover: (Canal) -> Unit, onRemover: (Canal) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    LazyColumn(modifier = modifier, contentPadding = PaddingValues(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Catálogos Gratuitos", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                BotaoAcao("📺 TV Brasil (M3U)") { onAbrirCanaisBrasil() }
+    Column(modifier = modifier.padding(horizontal = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedButton(enabled = !carregando, modifier = Modifier.weight(1f).height(38.dp), contentPadding = PaddingValues(8.dp, 0.dp), onClick = onCarregarBrasil) {
+                Text(if (carregando) "..." else "📺 Canais BR", fontSize = 12.sp)
+            }
+            OutlinedButton(enabled = !carregando, modifier = Modifier.weight(1f).height(38.dp), contentPadding = PaddingValues(8.dp, 0.dp), onClick = onCarregarPluto) {
+                Text(if (carregando) "..." else "🟣 Pluto TV BR", fontSize = 12.sp)
+            }
+            OutlinedButton(modifier = Modifier.height(38.dp), contentPadding = PaddingValues(12.dp, 0.dp), onClick = onLimpar) {
+                Text("Limpar", fontSize = 12.sp)
             }
         }
-        items(plataformasGratuitas) { plat ->
-            Row(
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFF191922))
-                    .clickable { onAbrirPlataforma(plat) }.padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).background(Color(plat.corHex)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(plat.icone, fontSize = 22.sp)
-                }
-                Spacer(Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(plat.nome, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    Spacer(Modifier.height(2.dp))
-                    Text(plat.subtitulo, color = Color.Gray, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                Box(
-                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFF2962FF)).padding(horizontal = 10.dp, vertical = 6.dp)
-                ) {
-                    Text("Abrir", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
+        val agoraMs = System.currentTimeMillis()
+        LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 10.dp)) {
+            itemsIndexed(listaCanais, key = { _, c -> c.id }) { index, canal ->
+                CardCanalLista(index, canal, canalAtual?.id == canal.id, buscarProgramaAtual(epgDados, canal, agoraMs),
+                    { onTocar(canal) }, { onFavoritar(canal) }, { onMover(canal) }, { onRemover(canal) })
             }
         }
     }
@@ -133,43 +121,26 @@ fun TelaInicioPlataformas(
 
 @Composable
 fun TelaFontesWebBusca(
-    query: String,
-    carregando: Boolean,
-    linksWeb: List<ResultadoWeb>,
-    onBuscarNaPlataforma: (PlataformaGratuita) -> Unit,
-    onAbrirFonteWeb: (ResultadoWeb) -> Unit,
-    onBuscaCompletaWeb: () -> Unit,
+    query: String, carregando: Boolean, canaisLocais: List<Canal>, canalAtual: Canal?, epgDados: EpgDados,
+    linksWeb: List<ResultadoWeb>, onTocarCanal: (Canal) -> Unit, onFavoritarCanal: (Canal) -> Unit,
+    onMoverCanal: (Canal) -> Unit, onRemoverCanal: (Canal) -> Unit,
+    onAbrirFonteWeb: (ResultadoWeb) -> Unit, onBuscaCompletaWeb: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val agoraMs = System.currentTimeMillis()
     LazyColumn(modifier = modifier, contentPadding = PaddingValues(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item {
-            Text("Buscar \"$query\" nas plataformas:", color = Color.LightGray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(6.dp))
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(plataformasGratuitas) { plat ->
-                    Box(
-                        modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(Color(plat.corHex))
-                            .clickable { onBuscarNaPlataforma(plat) }.padding(horizontal = 12.dp, vertical = 8.dp)
-                    ) {
-                        Text("${plat.icone} ${plat.nome}", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
+        if (canaisLocais.isNotEmpty()) {
+            item { Text("Canais encontrados na sua lista:", color = Color.LightGray, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+            itemsIndexed(canaisLocais, key = { _, c -> c.id }) { index, canal ->
+                CardCanalLista(index, canal, canalAtual?.id == canal.id, buscarProgramaAtual(epgDados, canal, agoraMs),
+                    { onTocarCanal(canal) }, { onFavoritarCanal(canal) }, { onMoverCanal(canal) }, { onRemoverCanal(canal) })
             }
         }
-        item {
-            Spacer(Modifier.height(4.dp))
-            Text("Fontes de sites encontradas:", color = Color.LightGray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        }
+        item { Text("Fontes de sites para \"$query\":", color = Color.LightGray, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
         if (carregando) {
-            item {
-                Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = Color(0xFF2962FF))
-                }
-            }
+            item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Color(0xFF2962FF)) } }
         } else if (linksWeb.isEmpty()) {
-            item {
-                Text("Nenhuma fonte direta encontrada. Toque em uma plataforma acima ou no botão abaixo.", color = Color.Gray, fontSize = 12.sp)
-            }
+            item { Text("Nenhuma fonte direta encontrada. Tente outro termo ou toque abaixo.", color = Color.Gray, fontSize = 12.sp) }
         } else {
             items(linksWeb) { web ->
                 Column(
