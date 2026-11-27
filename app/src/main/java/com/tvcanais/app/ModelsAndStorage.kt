@@ -37,53 +37,30 @@ enum class CategoriaCanal(val titulo: String, val icone: String) {
 }
 
 data class JellyfinConfig(
-    val serverUrl: String = "",
-    val username: String = "",
-    val userId: String = "",
-    val accessToken: String = "",
-    val deviceId: String = UUID.randomUUID().toString()
+    val serverUrl: String = "", val username: String = "", val userId: String = "",
+    val accessToken: String = "", val deviceId: String = UUID.randomUUID().toString()
 )
 
 data class JellyfinItem(
-    val id: String,
-    val nome: String,
-    val tipo: String,
-    val subtitulo: String = "",
-    val posterUrl: String? = null,
-    val ehPastaOuSerie: Boolean = false
+    val id: String, val nome: String, val tipo: String, val subtitulo: String = "",
+    val posterUrl: String? = null, val ehPastaOuSerie: Boolean = false
 )
 
 data class Canal(
     val id: String = UUID.randomUUID().toString(),
-    val nome: String,
-    val url: String,
-    val logoUrl: String? = null,
-    val tvgId: String? = null,
-    val isWebSite: Boolean = false,
-    val webOriginalUrl: String? = null,
-    val fallbackStreamUrl: String? = null,
-    val youtubeVideoId: String? = null,
-    val categoria: CategoriaCanal = CategoriaCanal.TV,
-    val favorito: Boolean = false
+    val nome: String, val url: String, val logoUrl: String? = null, val tvgId: String? = null,
+    val isWebSite: Boolean = false, val webOriginalUrl: String? = null, val fallbackStreamUrl: String? = null,
+    val youtubeVideoId: String? = null, val categoria: CategoriaCanal = CategoriaCanal.TV, val favorito: Boolean = false
 )
 
 data class CanalYouTube(
-    val channelId: String,
-    val nome: String,
-    val url: String,
-    val pasta: String = "Geral",
-    val favorito: Boolean = false
+    val channelId: String, val nome: String, val url: String,
+    val pasta: String = "Geral", val favorito: Boolean = false
 )
 
 data class VideoYouTubeFeed(
-    val videoId: String,
-    val titulo: String,
-    val canalId: String,
-    val canalNome: String,
-    val pasta: String,
-    val publicadoIso: String,
-    val dataFormatada: String,
-    val thumbUrl: String
+    val videoId: String, val titulo: String, val canalId: String, val canalNome: String,
+    val pasta: String, val publicadoIso: String, val dataFormatada: String, val thumbUrl: String
 )
 
 data class ProgramaEpg(val channelId: String, val titulo: String, val inicioMs: Long, val fimMs: Long)
@@ -102,9 +79,22 @@ fun JSONObject.optTexto(chave: String): String {
     return if (v == "null") "" else v
 }
 
-fun limparHtml(texto: String): String {
-    if (texto.isBlank()) return ""
-    return Html.fromHtml(texto, Html.FROM_HTML_MODE_COMPACT).toString().trim()
+fun limparHtml(texto: String): String =
+    if (texto.isBlank()) "" else Html.fromHtml(texto, Html.FROM_HTML_MODE_COMPACT).toString().trim()
+
+fun salvarPastasYt(context: Context, pastas: List<String>) {
+    val arr = JSONArray()
+    pastas.forEach { arr.put(it) }
+    context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE).edit().putString("yt_pastas", arr.toString()).apply()
+}
+
+fun carregarPastasYt(context: Context): List<String> {
+    val json = context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE).getString("yt_pastas", null) ?: return pastasPocketTube
+    return try {
+        val arr = JSONArray(json)
+        val list = (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() }
+        if (list.isEmpty()) pastasPocketTube else list
+    } catch (e: Exception) { pastasPocketTube }
 }
 
 fun salvarJellyfinConfig(context: Context, cfg: JellyfinConfig) {
@@ -119,11 +109,8 @@ fun carregarJellyfinConfig(context: Context): JellyfinConfig {
     val json = context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE).getString("jellyfin_cfg", null) ?: return JellyfinConfig()
     return try {
         val o = JSONObject(json)
-        JellyfinConfig(
-            o.optTexto("serverUrl"), o.optTexto("username"),
-            o.optTexto("userId"), o.optTexto("accessToken"),
-            o.optTexto("deviceId").ifBlank { UUID.randomUUID().toString() }
-        )
+        JellyfinConfig(o.optTexto("serverUrl"), o.optTexto("username"), o.optTexto("userId"),
+            o.optTexto("accessToken"), o.optTexto("deviceId").ifBlank { UUID.randomUUID().toString() })
     } catch (e: Exception) { JellyfinConfig() }
 }
 
