@@ -1,7 +1,6 @@
 package com.tvcanais.app
 
 import android.app.PictureInPictureParams
-import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.net.Uri
@@ -105,7 +104,6 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
     var telaCheia by remember { mutableStateOf(false) }
     var navegadorExpandido by remember { mutableStateOf(false) }
     var mostrarSiteCompleto by remember { mutableStateOf(false) }
-    var modoYoutubeWebDireto by remember { mutableStateOf(false) }
     var mensagemStatus by remember { mutableStateOf<String?>(null) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
 
@@ -146,6 +144,20 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
 
     fun atualizarCanais(nova: List<Canal>) { listaCanais = nova; salvarCanais(context, nova) }
     fun atualizarCanaisYt(nova: List<CanalYouTube>) { canaisYouTube = nova; salvarYouTube(context, nova) }
+
+    fun carregarListaM3u(url: String, rotulo: String) {
+        carregandoTv = true; mensagemStatus = "Baixando $rotulo..."
+        scope.launch {
+            val novos = processarLink(url)
+            if (novos.size > 1) {
+                atualizarCanais(novos + listaCanais)
+                canalAtual = novos.first()
+                pesquisaTv = ""
+                mensagemStatus = "${novos.size} canais ($rotulo) carregados!"
+            } else mensagemStatus = "Erro ao baixar $rotulo."
+            carregandoTv = false
+        }
+    }
 
     fun abrirSiteNoNavegador(titulo: String, url: String) {
         mostrarSiteCompleto = true
@@ -219,7 +231,6 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
     DisposableEffect(Unit) { onDispose { exoPlayer.release() } }
 
     LaunchedEffect(canalAtual) {
-        modoYoutubeWebDireto = false
         val c = canalAtual
         if (c != null && !c.isWebSite) {
             navegadorExpandido = false
@@ -242,7 +253,6 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
         modifier = Modifier.fillMaxSize().background(Color(0xFF0E0E12))
             .then(if (playerExpandido) Modifier else Modifier.statusBarsPadding().navigationBarsPadding())
     ) {
-        // 1. ÁREA DO PLAYER FIXO NO TOPO (OU NAVEGADOR EXPANDIDO PARA PLATAFORMAS)
         if (canalAtual != null || abaPrincipal != AbaPrincipal.NAVEGADOR || playerExpandido) {
             val modifierBox = when {
                 playerExpandido -> Modifier.fillMaxSize().background(Color.Black)
@@ -252,9 +262,8 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
             Box(modifier = modifierBox, contentAlignment = Alignment.Center) {
                 val atual = canalAtual
                 if (atual == null) {
-                    Text("TV & Plataformas Gratuitas", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                } else if (atual.youtubeVideoId != null && !modoYoutubeWebDireto) {
-                    // PLAYER OFICIAL DO YOUTUBE SEM TELA PRETA (HARDWARE ACCELERATED)
+                    Text("TV & Canais", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                } else if (atual.youtubeVideoId != null) {
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
                         factory = { ctx ->
@@ -266,24 +275,18 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                                     override fun onReady(youTubePlayer: YouTubePlayer) {
                                         ytPlayerRef = youTubePlayer
                                         val vid = canalAtual?.youtubeVideoId
-                                        if (vid != null) {
-                                            lastLoadedYtId = vid
-                                            youTubePlayer.loadVideo(vid, 0f)
-                                        }
+                                        if (vid != null) { lastLoadedYtId = vid; youTubePlayer.loadVideo(vid, 0f) }
                                     }
                                 }, options)
                             }
                         },
                         onRelease = { ytView ->
-                            ytPlayerRef = null
-                            lastLoadedYtId = null
-                            activity.lifecycle.removeObserver(ytView)
-                            ytView.release()
+                            ytPlayerRef = null; lastLoadedYtId = null
+                            activity.lifecycle.removeObserver(ytView); ytView.release()
                         }
                     )
                 } else if (atual.isWebSite) {
                     var capturou by remember(atual.url) { mutableStateOf(false) }
-                    val chaveCarga = "${atual.url}_$modoYoutubeWebDireto"
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
                         factory = { ctx ->
@@ -296,7 +299,6 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                                 }
                                 webViewClient = object : WebViewClient() {
                                     override fun shouldInterceptRequest(v: WebView?, r: WebResourceRequest?): WebResourceResponse? {
-                                        if (atual.youtubeVideoId != null) return super.shouldInterceptRequest(v, r)
                                         val u = r?.url?.toString() ?: return null
                                         val ehMidia = u.contains(".m3u8", true) || u.contains(".mpd", true) || u.contains(".mp4", true)
                                         val ehAnuncio = u.contains("doubleclick", true) || u.contains("googlesyndication", true) || u.contains("ads", true)
@@ -315,11 +317,7 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                         },
                         update = { wv ->
                             webViewRef = wv
-                            if (wv.tag != chaveCarga) {
-                                wv.tag = chaveCarga
-                                if (atual.youtubeVideoId != null) wv.loadUrl("https://m.youtube.com/watch?v=${atual.youtubeVideoId}")
-                                else wv.loadUrl(atual.url)
-                            }
+                            if (wv.tag != atual.url) { wv.tag = atual.url; wv.loadUrl(atual.url) }
                         }
                     )
                 } else {
@@ -338,10 +336,7 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                     }
                     Text(canalAtual!!.nome, color = Color(0xFF66BB6A), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     Spacer(Modifier.width(4.dp))
-                    if (canalAtual!!.youtubeVideoId != null) {
-                        BotaoAcao(if (modoYoutubeWebDireto) "Player 1" else "Player 2") { modoYoutubeWebDireto = !modoYoutubeWebDireto }
-                        Spacer(Modifier.width(4.dp))
-                    } else if (canalAtual!!.isWebSite) {
+                    if (canalAtual!!.isWebSite && canalAtual!!.youtubeVideoId == null) {
                         BotaoAcao(if (navegadorExpandido) "16:9" else "Expandir") { navegadorExpandido = !navegadorExpandido }
                         Spacer(Modifier.width(4.dp))
                         BotaoAcao(if (mostrarSiteCompleto) "Focar" else "Site") { mostrarSiteCompleto = !mostrarSiteCompleto; canalAtual = canalAtual!!.copy() }
@@ -375,16 +370,23 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                             BotaoAcao("←") { emBuscaFontes = false }
                             Spacer(Modifier.width(6.dp))
                         }
-                        CampoTextoCompacto(homeQuery, { homeQuery = it }, "🔍 Pesquisar filme, série, novela ou fonte...", Modifier.weight(1f))
+                        CampoTextoCompacto(homeQuery, { homeQuery = it }, "🔍 Pesquisar filme, série, novela ou canal...", Modifier.weight(1f))
                         Spacer(Modifier.width(6.dp))
                         Button(enabled = !carregandoBusca && homeQuery.isNotBlank(), modifier = Modifier.height(40.dp), contentPadding = PaddingValues(14.dp, 0.dp), onClick = { pesquisarFontesWeb(homeQuery) }) {
                             Text(if (carregandoBusca) "..." else "Ir", fontSize = 12.sp)
                         }
                     }
                     if (emBuscaFontes) {
+                        val canaisLocais = remember(listaCanais, homeQuery) {
+                            val q = homeQuery.trim()
+                            if (q.isEmpty()) emptyList() else listaCanais.filter { it.nome.contains(q, true) }
+                        }
                         TelaFontesWebBusca(
-                            homeQuery, carregandoBusca, linksWebBusca,
-                            { plat -> abrirSiteNoNavegador("${plat.nome}: $homeQuery", plat.gerarUrlBusca(homeQuery)) },
+                            homeQuery, carregandoBusca, canaisLocais, canalAtual, epgDados, linksWebBusca,
+                            { canalAtual = it },
+                            { c -> atualizarCanais(listaCanais.map { if (it.id == c.id) it.copy(favorito = !it.favorito) else it }) },
+                            { canalParaMover = it },
+                            { c -> atualizarCanais(listaCanais.filterNot { it.id == c.id }) },
                             { web -> abrirSiteNoNavegador(web.titulo, web.url) },
                             {
                                 val enc = URLEncoder.encode("$homeQuery assistir dublado portugues", "UTF-8")
@@ -393,25 +395,23 @@ fun TelaPrincipalApp(activity: MainActivity, isInPip: Boolean) {
                             Modifier.fillMaxWidth().weight(1f)
                         )
                     } else {
-                        TelaInicioPlataformas(
-                            onAbrirPlataforma = { plat -> abrirSiteNoNavegador(plat.nome, plat.urlHome) },
-                            onAbrirCanaisBrasil = { abaPrincipal = AbaPrincipal.TV },
-                            modifier = Modifier.fillMaxWidth().weight(1f)
+                        TelaInicioCanais(
+                            listaCanais, canalAtual, epgDados, carregandoTv,
+                            { carregarListaM3u("https://iptv-org.github.io/iptv/countries/br.m3u", "Canais BR") },
+                            { carregarListaM3u("https://raw.githubusercontent.com/iptv-org/iptv/master/streams/br_pluto.m3u", "Pluto TV BR") },
+                            { atualizarCanais(emptyList()); canalAtual = null },
+                            { canalAtual = it },
+                            { c -> atualizarCanais(listaCanais.map { if (it.id == c.id) it.copy(favorito = !it.favorito) else it }) },
+                            { canalParaMover = it },
+                            { c -> atualizarCanais(listaCanais.filterNot { it.id == c.id }) },
+                            Modifier.fillMaxWidth().weight(1f)
                         )
                     }
                 }
                 AbaPrincipal.TV -> TelaTvAoVivo(
                     listaCanais, canalAtual, epgDados, pesquisaTv, linkDigitadoTv, carregandoTv,
                     { pesquisaTv = it }, { linkDigitadoTv = it },
-                    {
-                        carregandoTv = true; mensagemStatus = "Baixando canais do Brasil..."
-                        scope.launch {
-                            val br = processarLink("https://iptv-org.github.io/iptv/countries/br.m3u")
-                            if (br.size > 1) { atualizarCanais(br + listaCanais); canalAtual = br.first(); pesquisaTv = ""; mensagemStatus = "${br.size} canais carregados!" }
-                            else mensagemStatus = "Erro ao baixar lista."
-                            carregandoTv = false
-                        }
-                    },
+                    { carregarListaM3u("https://iptv-org.github.io/iptv/countries/br.m3u", "Canais BR") },
                     { atualizarCanais(emptyList()); canalAtual = null },
                     { raw ->
                         carregandoTv = true
